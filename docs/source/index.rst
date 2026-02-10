@@ -36,7 +36,7 @@ Key Features
 Quick Links
 -----------
 
-- **GitHub Repository**: https://github.com/Contextbench/contextbench
+- **GitHub Repository**: https://github.com/EuniAI/ContextBench
 - **Paper**: https://arxiv.org/abs/2602.05892
 - **Dataset**: https://huggingface.co/datasets/Contextbench/ContextBench
 - **Live Leaderboard**: https://contextbench.github.io/

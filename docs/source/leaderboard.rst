@@ -128,7 +128,7 @@ To submit your agent's results to the leaderboard:
 3. **Submit via GitHub** by opening a pull request with your results
 4. **Include metadata**: Model name, version, cost, and configuration
 
-See the `submission guidelines <https://github.com/Contextbench/contextbench/blob/main/SUBMISSION.md>`_ for details.
+See the `submission guidelines <https://github.com/EuniAI/ContextBench/blob/main/SUBMISSION.md>`_ for details.
 
 Evaluation Criteria
 -------------------

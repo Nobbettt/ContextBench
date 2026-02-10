@@ -15,8 +15,8 @@ Clone the repository:
 
 .. code-block:: bash
 
-   git clone https://github.com/Contextbench/contextbench.git
-   cd contextbench
+   git clone https://github.com/EuniAI/ContextBench.git
+   cd ContextBench
 
 Install Dependencies
 --------------------

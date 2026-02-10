@@ -92,11 +92,11 @@ Contact
 
 For questions, suggestions, or collaborations, please:
 
-- **Open an issue**: https://github.com/Contextbench/contextbench/issues
+- **Open an issue**: https://github.com/EuniAI/ContextBench/issues
 - **Email**: [contact email]
 - **Website**: https://contextbench.github.io/
 
 License
 -------
 
-ContextBench is released under the **Apache License 2.0**. See the `LICENSE <https://github.com/Contextbench/contextbench/blob/main/LICENSE>`_ file for details.
+ContextBench is released under the **Apache License 2.0**. See the `LICENSE <https://github.com/EuniAI/ContextBench/blob/main/LICENSE>`_ file for details.
