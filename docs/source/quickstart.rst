@@ -55,10 +55,10 @@ The evaluation produces a JSON Lines file with detailed metrics for each instanc
        "span": {"coverage": 1.0, "precision": 0.126, "f1": 0.224}
      },
      "trajectory": {
-       "steps": [
-         {"step": 1, "coverage": {"file": 0.5, "symbol": 0.3, ...}},
-         ...
-       ],
+      "steps": [
+        {"step": 1, "coverage": {"file": 0.5, "symbol": 0.3, "span": 0.2}},
+        {"step": 2, "coverage": {"file": 0.8, "symbol": 0.6, "span": 0.5}}
+      ],
        "auc_coverage": {"file": 1.0, "symbol": 1.0, "span": 1.0},
        "redundancy": {"file": 0.5, "symbol": 0.58, "span": 0.12}
        },

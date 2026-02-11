@@ -14,7 +14,7 @@
   <a href="https://arxiv.org/abs/2602.05892"><img src="https://img.shields.io/badge/arXiv-2602.05892-b31b1b?style=for-the-badge&logo=arxiv&logoColor=white" alt="arXiv"></a>
   <a href="https://huggingface.co/datasets/Contextbench/ContextBench"><img src="https://img.shields.io/badge/🤗%20Dataset-Hugging%20Face-yellow?style=for-the-badge" alt="Hugging Face Dataset"></a>
   <a href="https://contextbench.github.io/"><img src="https://img.shields.io/badge/Leaderboard-Live-blue?style=for-the-badge" alt="Leaderboard"></a>
-  <a href="https://contextbench.readthedocs.io/"><img src="https://img.shields.io/badge/Docs-ReadTheDocs-blue?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Documentation"></a>
+  <a href="docs/"><img src="https://img.shields.io/badge/Docs-Sphinx-blue?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Documentation"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-green?style=for-the-badge" alt="License"></a>
 </p>
 
@@ -47,6 +47,10 @@ ContextBench augments existing end-to-end benchmarks with intermediate gold-cont
 The pipeline extracts file views and spans from agent trajectories, then computes coverage and precision metrics by comparing against human-annotated gold context at multiple granularities.
 
 ## Leaderboard
+
+<p align="center">
+  <img src="docs/assets/figures/leaderboard.png" alt="ContextBench Leaderboard" width="100%">
+</p>
 
 🏆 **Live leaderboard and interactive results**: [https://contextbench.github.io/](https://contextbench.github.io/)
 
@@ -125,7 +129,7 @@ ContextBench/                    # Repository root
 └── requirements.txt             # Python dependencies
 ```
 
-For detailed metrics definitions and implementation, see the [Sphinx documentation](https://contextbench.readthedocs.io/).
+For detailed metrics definitions and implementation, see the [Sphinx documentation](docs/).
 
 ## Citation
 
