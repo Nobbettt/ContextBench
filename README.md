@@ -14,7 +14,7 @@
   <a href="https://arxiv.org/abs/2602.05892"><img src="https://img.shields.io/badge/arXiv-2602.05892-b31b1b?style=for-the-badge&logo=arxiv&logoColor=white" alt="arXiv"></a>
   <a href="https://huggingface.co/datasets/Contextbench/ContextBench"><img src="https://img.shields.io/badge/🤗%20Dataset-Hugging%20Face-yellow?style=for-the-badge" alt="Hugging Face Dataset"></a>
   <a href="https://contextbench.github.io/"><img src="https://img.shields.io/badge/Leaderboard-Live-blue?style=for-the-badge" alt="Leaderboard"></a>
-  <a href="docs/"><img src="https://img.shields.io/badge/Docs-Sphinx-blue?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Documentation"></a>
+  <a href="https://euniai.github.io/ContextBench/"><img src="https://img.shields.io/badge/Docs-Online-blue?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Documentation"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-green?style=for-the-badge" alt="License"></a>
 </p>
 
@@ -95,6 +95,8 @@ The evaluation automatically detects trajectory formats, clones repositories, ex
 
 
 ## Documentation
+
+ **Online documentation**: `https://euniai.github.io/ContextBench/`
 
  **Complete documentation** is available in the [`docs/`](docs/) directory:
 
