@@ -10,7 +10,7 @@ BibTeX
 
    @misc{li2026contextbenchbenchmarkcontextretrieval,
      title={ContextBench: A Benchmark for Context Retrieval in Coding Agents}, 
-     author={Han Li and Letian Zhu and Bohan Zhang and Rili Feng and Jiaming Wang and Yue Pan and Earl T. Barr and Sarro Federica and Zhaoyang Chu and He Ye},
+     author={Han Li and Letian Zhu and Bohan Zhang and Rili Feng and Jiaming Wang and Yue Pan and Earl T. Barr and Federica Sarro and Zhaoyang Chu and He Ye},
      year={2026},
      eprint={2602.05892},
      archivePrefix={arXiv},
