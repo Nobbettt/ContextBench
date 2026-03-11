@@ -25,6 +25,7 @@ Extension files in this directory map to the following paths **inside the mini-s
 | `agents/context_aware.py` | `src/minisweagent/agents/context_aware.py` |
 | `configs/swebench_context_aware.yaml` | `src/minisweagent/config/extra/swebench_context_aware.yaml` |
 | `configs/swebench_following_context.yaml` | `src/minisweagent/config/extra/swebench_following_context.yaml` |
+| `configs/swebench_multi.yaml` | `src/minisweagent/config/extra/swebench_multi.yaml` |
 | `run/swebench_context_aware.py` | `src/minisweagent/run/extra/swebench_context_aware.py` |
 
 **Customization:**
@@ -44,7 +45,8 @@ multi-poly-pro-verified/
 │   └── context_aware.py          # Context-Aware Agent
 ├── configs/
 │   ├── swebench_context_aware.yaml
-│   └── swebench_following_context.yaml
+│   ├── swebench_following_context.yaml
+│   └── swebench_multi.yaml
 ├── run/
 │   └── swebench_context_aware.py  # Batch run entry
 ├── mini-swe-agent/                # Upstream repo (full code & docs)
@@ -63,6 +65,7 @@ multi-poly-pro-verified/
 |-----------|----------|-------------|
 | **Context-Aware Agent** | `agents/context_aware.py` | Asks the agent to provide code context before submitting a patch for easier analysis and reproduction. Config: `configs/swebench_context_aware.yaml`. |
 | **Following-Context Agent** | `configs/swebench_following_context.yaml` | Uses markers such as `<EXPLORE_CONTEXT>` to track code exploration during the run. |
+| **Multi-Bench Config** | `configs/swebench_multi.yaml` | Configuration tuned for running on Multi-SWE-bench, used by ContextBench `run_miniswe` for the `Multi` bench. |
 | **Batch Run Script** | `run/swebench_context_aware.py` | Supports SWE-bench (lite/verified), SWE-bench Pro, Multi-SWE-bench, PolyBench. Instance selection via `--subset`, `--filter`, `--slice`; parallel runs via `--workers`. |
 
 ---

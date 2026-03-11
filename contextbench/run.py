@@ -474,11 +474,16 @@ def run_miniswe(task: Dict[str, Any], output_dir: Path, timeout: int = 1800) -> 
     subset = subset_map.get(bench, "verified")
     out_subdir = output_dir / "miniswe" / bench
     out_subdir.mkdir(parents=True, exist_ok=True)
-    
-    # Use the context-aware config file (required for ContextAwareAgent)
-    # The config is in the multi-poly-pro-verified/configs directory
+
+    # Select MiniSWE config by bench:
+    # - Verified/Pro/Poly → swebench_following_context.yaml
+    # - Multi → swebench_multi.yaml
     miniswe_root = AGENT_FRAMEWORKS / "mini-swe-agent" / "multi-poly-pro-verified"
-    config_file = miniswe_root / "configs" / "swebench_context_aware.yaml"
+    if bench == "Multi":
+        config_name = "swebench_multi.yaml"
+    else:
+        config_name = "swebench_following_context.yaml"
+    config_file = miniswe_root / "configs" / config_name
     if not config_file.exists():
         return False, f"Config file not found: {config_file}"
     
