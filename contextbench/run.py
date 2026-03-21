@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Fork note: Modified by Norbert Laszlo on 2026-03-16 from upstream ContextBench.
+# Summary of changes: add Codex and Claude runner support to the unified entrypoint.
+
 """
 ContextBench Agent Runner
 
@@ -23,11 +27,20 @@ Usage:
     # Run miniswe on first 5 Pro instances
     python -m contextbench.run --agent miniswe --bench Pro --limit 5
 
+    # Run Codex on the default selected slice
+    python -m contextbench.run --agent codex --limit 5
+
+    # Run Claude on Poly
+    python -m contextbench.run --agent claude --bench Poly --limit 3
+
     # Run on specific instances only
     python -m contextbench.run --agent agentless --instances "scikit-learn__scikit-learn-25232,django__django-14434"
 
     # Use custom subset CSV
     python -m contextbench.run --agent miniswe --subset-csv my_subset.csv --output results/my_run
+
+    # Codex/Claude use --task-data for prompt-capable task inputs
+    python -m contextbench.run --agent codex --task-data data/full.parquet --limit 1
 
     # Dry run (list tasks only)
     python -m contextbench.run --agent miniswe --bench Verified --dry-run
@@ -45,6 +58,13 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+from .coding_agents.constants import (
+    DEFAULT_CACHE_DIR as DEFAULT_REPO_CACHE_DIR,
+    DEFAULT_GOLD_PATH as DEFAULT_TASK_DATA_PATH,
+    DEFAULT_OUTPUT_SCHEMA_PATH as DEFAULT_CODING_AGENT_SCHEMA_PATH,
+)
+from .coding_agents.task_data import load_tasks as load_prompt_tasks
 
 # Repo root (Context-Bench)
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -98,6 +118,7 @@ def _run_subprocess(
     env: Optional[Dict[str, str]] = None,
     timeout: Optional[int] = None,
     debug: bool = False,
+    input_text: Optional[str] = None,
 ) -> subprocess.CompletedProcess:
     """Run subprocess with optional live debug output."""
     if debug:
@@ -108,6 +129,8 @@ def _run_subprocess(
             cwd=cwd,
             env=env,
             timeout=timeout,
+            input=input_text,
+            text=True,
         )
         return subprocess.CompletedProcess(cmd, result.returncode, stdout="", stderr="")
     return subprocess.run(
@@ -115,6 +138,7 @@ def _run_subprocess(
         cwd=cwd,
         env=env,
         timeout=timeout,
+        input=input_text,
         capture_output=True,
         text=True,
     )
@@ -702,6 +726,99 @@ def run_openhands(task: Dict[str, Any], output_dir: Path, timeout: int = 1800) -
         return False, str(e)
 
 
+def _run_coding_agent_wrapper(
+    agent: str,
+    wrapper_dir: str,
+    task: Dict[str, Any],
+    output_dir: Path,
+    timeout: int,
+    repo_cache_dir: Path,
+    schema_path: Path,
+) -> Tuple[bool, str]:
+    script = AGENT_FRAMEWORKS / wrapper_dir / "run_bench.py"
+    if not script.exists():
+        return False, f"Agent wrapper not found: {script}"
+
+    bench = task.get("bench", "Verified")
+    out_subdir = output_dir / agent / bench
+    out_subdir.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        sys.executable,
+        str(script),
+        "--output-dir",
+        str(out_subdir),
+        "--cache-dir",
+        str(repo_cache_dir),
+        "--schema",
+        str(schema_path),
+        "--timeout",
+        str(timeout),
+    ]
+
+    try:
+        result = _run_subprocess(
+            cmd,
+            cwd=str(script.parent),
+            timeout=timeout + 300,
+            debug=_DEBUG,
+            input_text=json.dumps(task),
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"Timeout after {timeout + 300}s"
+    except Exception as exc:
+        return False, str(exc)
+
+    if result.returncode != 0:
+        return False, result.stderr or result.stdout or f"exit {result.returncode}"
+
+    try:
+        summary = json.loads((result.stdout or "").strip() or "{}")
+    except json.JSONDecodeError:
+        summary = {}
+    status = summary.get("status") or "unknown"
+    task_dir = summary.get("task_dir") or str(out_subdir)
+    return True, f"artifacts in {task_dir} (status {status})"
+
+
+def run_codex(
+    task: Dict[str, Any],
+    output_dir: Path,
+    timeout: int = 1800,
+    *,
+    repo_cache_dir: Path,
+    schema_path: Path,
+) -> Tuple[bool, str]:
+    return _run_coding_agent_wrapper(
+        "codex",
+        "codex",
+        task,
+        output_dir,
+        timeout,
+        repo_cache_dir=repo_cache_dir,
+        schema_path=schema_path,
+    )
+
+
+def run_claude(
+    task: Dict[str, Any],
+    output_dir: Path,
+    timeout: int = 1800,
+    *,
+    repo_cache_dir: Path,
+    schema_path: Path,
+) -> Tuple[bool, str]:
+    return _run_coding_agent_wrapper(
+        "claude",
+        "claude-code",
+        task,
+        output_dir,
+        timeout,
+        repo_cache_dir=repo_cache_dir,
+        schema_path=schema_path,
+    )
+
+
 # Agent -> bench -> runner
 AGENT_RUNNERS: Dict[str, Dict[str, Any]] = {
     "agentless": {
@@ -728,6 +845,18 @@ AGENT_RUNNERS: Dict[str, Dict[str, Any]] = {
         "Poly": run_openhands,
         "Multi": run_openhands,
     },
+    "codex": {
+        "Verified": run_codex,
+        "Pro": run_codex,
+        "Poly": run_codex,
+        "Multi": run_codex,
+    },
+    "claude": {
+        "Verified": run_claude,
+        "Pro": run_claude,
+        "Poly": run_claude,
+        "Multi": run_claude,
+    },
 }
 
 
@@ -736,8 +865,31 @@ def run_instance(
     task: Dict[str, Any],
     output_dir: Path,
     timeout: int = 1800,
+    repo_cache_dir: Optional[Path] = None,
+    schema_path: Optional[Path] = None,
 ) -> Tuple[bool, str]:
     """Dispatch to bench-adapted agent runner."""
+    if agent == "codex":
+        if repo_cache_dir is None or schema_path is None:
+            return False, "Missing codex runtime configuration"
+        return run_codex(
+            task,
+            output_dir,
+            timeout=timeout,
+            repo_cache_dir=repo_cache_dir,
+            schema_path=schema_path,
+        )
+    if agent == "claude":
+        if repo_cache_dir is None or schema_path is None:
+            return False, "Missing claude runtime configuration"
+        return run_claude(
+            task,
+            output_dir,
+            timeout=timeout,
+            repo_cache_dir=repo_cache_dir,
+            schema_path=schema_path,
+        )
+
     bench = task.get("bench", "Verified")
     runners = AGENT_RUNNERS.get(agent)
     if not runners:
@@ -794,6 +946,18 @@ def main() -> int:
         type=Path,
         default=None,
         help="Use gold JSONL instead of CSV (bench inferred from instance_id)",
+    )
+    ap.add_argument(
+        "--task-data",
+        type=Path,
+        default=DEFAULT_TASK_DATA_PATH,
+        help="Prompt-capable task source for codex/claude (parquet/json/jsonl)",
+    )
+    ap.add_argument(
+        "--repo-cache",
+        type=Path,
+        default=DEFAULT_REPO_CACHE_DIR,
+        help="Repository checkout cache used by codex/claude wrappers",
     )
     ap.add_argument(
         "--output",
@@ -867,26 +1031,41 @@ def main() -> int:
         instance_filter = [s.strip() for s in args.instances.split(",") if s.strip()]
 
     # Load tasks
-    if use_gold:
-        if not args.gold_jsonl.exists():
-            print(f"ERROR: Gold JSONL not found: {args.gold_jsonl}", file=sys.stderr)
+    if args.agent in ("codex", "claude"):
+        if not args.task_data.exists():
+            print(f"ERROR: Task data not found: {args.task_data}", file=sys.stderr)
             return 2
-        tasks = load_tasks_from_gold_jsonl(
-            args.gold_jsonl,
+        if task_source is not None and not task_source.exists():
+            print(f"ERROR: Task CSV not found: {task_source}", file=sys.stderr)
+            return 2
+        tasks = load_prompt_tasks(
+            args.task_data,
+            subset_csv=task_source,
             bench_filter=bench_filter,
             instance_filter=instance_filter,
             limit=args.limit,
         )
     else:
-        if not task_source.exists():
-            print(f"ERROR: Task CSV not found: {task_source}", file=sys.stderr)
-            return 2
-        tasks = load_tasks_from_csv(
-            task_source,
-            bench_filter=bench_filter,
-            instance_filter=instance_filter,
-            limit=args.limit,
-        )
+        if use_gold:
+            if not args.gold_jsonl.exists():
+                print(f"ERROR: Gold JSONL not found: {args.gold_jsonl}", file=sys.stderr)
+                return 2
+            tasks = load_tasks_from_gold_jsonl(
+                args.gold_jsonl,
+                bench_filter=bench_filter,
+                instance_filter=instance_filter,
+                limit=args.limit,
+            )
+        else:
+            if not task_source.exists():
+                print(f"ERROR: Task CSV not found: {task_source}", file=sys.stderr)
+                return 2
+            tasks = load_tasks_from_csv(
+                task_source,
+                bench_filter=bench_filter,
+                instance_filter=instance_filter,
+                limit=args.limit,
+            )
 
     if not tasks:
         print("No tasks matched filters.", file=sys.stderr)
@@ -932,7 +1111,14 @@ def main() -> int:
                 args.output,
                 [task.get("instance_id", ""), task.get("original_inst_id", "")],
             )
-        ok, msg = run_instance(args.agent, task, args.output, timeout=args.timeout)
+        ok, msg = run_instance(
+            args.agent,
+            task,
+            args.output,
+            timeout=args.timeout,
+            repo_cache_dir=args.repo_cache,
+            schema_path=DEFAULT_CODING_AGENT_SCHEMA_PATH,
+        )
         if ok:
             success += 1
             print(f"  ✓ {msg}", flush=True)

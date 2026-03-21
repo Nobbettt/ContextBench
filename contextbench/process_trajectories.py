@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Fork note: Modified by Norbert Laszlo on 2026-03-16 from upstream ContextBench.
+# Summary of changes: support converting coding-agent run records into ContextBench trajectories.
+
 """
 Unified Trajectory Processing Interface
 
@@ -12,6 +16,9 @@ Usage:
   # Convert with built-in parser
   python -m contextbench.process_trajectories convert -i /path/to/your/output -o pred.jsonl --agent prometheus
 
+  # Convert Codex or Claude run records produced by contextbench.run
+  python -m contextbench.process_trajectories convert -i results/agent_runs/codex -o pred.jsonl --agent codex
+
   # Convert with custom parser (edit contextbench/parsers/custom_parser.py first)
   python -m contextbench.process_trajectories convert -i /path/to/output -o pred.jsonl --agent custom
 """
@@ -24,6 +31,8 @@ import json
 import sys
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
+
+from contextbench.coding_agents.conversion import load_predictions_from_path
 
 
 def _load_pred(path: str) -> List[dict]:
@@ -72,6 +81,10 @@ def _load_agentless_dir(instance_dir: Path) -> dict:
 def _load_path(path: str, agent: Optional[str] = None) -> List[dict]:
     """Load trajectory from path; handles files, OpenHands dirs, and agentless instance dirs."""
     p = Path(path)
+    normalized_agent = agent.lower().replace("_", "-") if agent else None
+    if normalized_agent in ("codex", "claude", "claude-code"):
+        expected_agent = "claude" if normalized_agent == "claude-code" else normalized_agent
+        return load_predictions_from_path(p, expected_agent=expected_agent)
     if p.is_dir():
         if agent == "agentless":
             try:
@@ -166,7 +179,7 @@ def _collect_paths_by_agent(root: Path, agent: str, recursive: bool) -> List[Pat
                 out.append(d)
     else:
         raise ValueError(
-            f"Unknown agent: {agent}. Use one of: prometheus, swe-agent, mini-swe-agent, openhands, agentless, custom."
+            f"Unknown agent: {agent}. Use one of: prometheus, swe-agent, mini-swe-agent, openhands, agentless, codex, claude, custom."
         )
     return sorted(set(out))
 
@@ -256,7 +269,7 @@ def cmd_convert(args: argparse.Namespace) -> int:
     """Convert trajectory files to evaluation-ready JSONL."""
     if not args.agent:
         print("ERROR: convert requires --agent. Specify which agent produced the trajectories.", file=sys.stderr)
-        print("  --agent: prometheus, openhands, swe-agent, mini-swe-agent, agentless, custom", file=sys.stderr)
+        print("  --agent: prometheus, openhands, swe-agent, mini-swe-agent, agentless, codex, claude, custom", file=sys.stderr)
         print("  Use --agent custom when format is not built-in (edit contextbench/parsers/custom_parser.py)", file=sys.stderr)
         return 2
 
@@ -276,6 +289,16 @@ def cmd_convert(args: argparse.Namespace) -> int:
             for inp in inputs:
                 try:
                     preds = parser_fn(str(inp))
+                    for p in preds:
+                        _ensure_traj_format(p)
+                        f.write(json.dumps(p, ensure_ascii=False, default=str) + "\n")
+                        written += 1
+                except Exception as e:
+                    print(f"  Warning: {inp}: {e}", file=sys.stderr)
+        elif agent in ("codex", "claude", "claude-code"):
+            for inp in inputs:
+                try:
+                    preds = _load_path(str(inp), agent=agent)
                     for p in preds:
                         _ensure_traj_format(p)
                         f.write(json.dumps(p, ensure_ascii=False, default=str) + "\n")
@@ -435,7 +458,7 @@ def main() -> int:
     p_convert.add_argument(
         "--agent", "-a",
         required=True,
-        help="Agent that produced trajectories: prometheus, openhands, swe-agent, mini-swe-agent, agentless, custom (edit contextbench/parsers/custom_parser.py)",
+        help="Agent that produced trajectories: prometheus, openhands, swe-agent, mini-swe-agent, agentless, codex, claude, custom (edit contextbench/parsers/custom_parser.py)",
     )
     p_convert.add_argument("-r", "--recursive", action="store_true", help="Recurse subdirectories")
     p_convert.set_defaults(func=cmd_convert)

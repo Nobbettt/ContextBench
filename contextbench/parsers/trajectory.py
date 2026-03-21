@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+# Fork note: Modified by Norbert Laszlo on 2026-03-16 from upstream ContextBench.
+# Summary of changes: extend unified trajectory parsing for Codex and Claude records.
+
 """Unified trajectory parsing interface."""
 
 import json
@@ -146,6 +150,28 @@ def load_traj_file(traj_file: str) -> dict:
             pass
     elif basename.endswith('.log'):
         instance_id = basename.replace('.log', '')
+    elif basename.endswith('.codex-record.json'):
+        instance_id = basename.replace('.codex-record.json', '')
+        try:
+            with open(traj_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    if data.get("instance_id"):
+                        instance_id = data.get("instance_id")
+                    model_patch = data.get("model_patch", "") or ""
+        except Exception:
+            pass
+    elif basename.endswith('.claude-record.json'):
+        instance_id = basename.replace('.claude-record.json', '')
+        try:
+            with open(traj_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    if data.get("instance_id"):
+                        instance_id = data.get("instance_id")
+                    model_patch = data.get("model_patch", "") or ""
+        except Exception:
+            pass
     else:
         instance_id = basename
     
@@ -248,6 +274,8 @@ def load_pred(path: str) -> List[dict]:
         or path.endswith('.checkpoints.jsonl')
         or path.endswith('_traj.json')
         or path.endswith('.log')
+        or path.endswith('.codex-record.json')
+        or path.endswith('.claude-record.json')
         or path.endswith('.context.json')
         or path.endswith('patch_context.txt')
         or path.endswith('.traj')
@@ -318,4 +346,3 @@ def load_pred(path: str) -> List[dict]:
         if isinstance(obj, list):
             return obj
         return [obj]
-

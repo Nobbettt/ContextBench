@@ -1,3 +1,7 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Fork note: Modified by Norbert Laszlo on 2026-03-16 from upstream ContextBench. -->
+<!-- Summary of changes: document fork-specific Codex CLI and Claude Code CLI wrapper support. -->
+
 # ContextBench Agent Runner Usage Guide
 
 `contextbench.run` is the unified Agent runner for ContextBench. It supports a three-step workflow: **load task list**, **run Agent**, and **output trajectories**.
@@ -12,7 +16,7 @@
 
 For each instance, the script:
 
-1. Parses the **Agent** to use (e.g. agentless, miniswe)
+1. Parses the **Agent** to use (e.g. agentless, miniswe, codex, claude)
 2. Determines the instance's **native bench** (Verified / Pro / Poly / Multi)
 3. Invokes the agent framework adapted for that bench:
 
@@ -27,7 +31,7 @@ For each instance, the script:
 
 | Argument | Description |
 |----------|-------------|
-| `--agent` | Agent to use: `agentless`, `miniswe`, `sweagent`, or `openhands` |
+| `--agent` | Agent to use: `agentless`, `miniswe`, `sweagent`, `openhands`, `codex`, or `claude` |
 
 ### Task Source
 
@@ -36,6 +40,8 @@ For each instance, the script:
 | `--task-csv` | `data/selected_500_instances.csv` | Path to task list CSV |
 | `--subset-csv` | - | Custom subset CSV (overrides `--task-csv`) |
 | `--gold-jsonl` | - | Use gold JSONL instead of CSV (bench inferred from instance_id) |
+| `--task-data` | `data/full.parquet` | Prompt-capable task source used by `codex` and `claude` |
+| `--repo-cache` | `.cache/repos` | Repository checkout cache used by `codex` and `claude` |
 
 ### Task Filtering
 
@@ -78,6 +84,12 @@ python -m contextbench.run --agent agentless --bench Verified
 
 # Run miniswe on Pro, first 5 instances only
 python -m contextbench.run --agent miniswe --bench Pro --limit 5
+
+# Run the Codex CLI wrapper on the default selected slice
+python -m contextbench.run --agent codex --limit 5
+
+# Run the Claude Code CLI wrapper on Poly
+python -m contextbench.run --agent claude --bench Poly --limit 3
 
 # Run agentless on Poly
 python -m contextbench.run --agent agentless --bench Poly
@@ -147,6 +159,18 @@ python -m contextbench.run --agent agentless \
 - Entry point: `openhands/{verified|poly-pro|multi}/evaluation/benchmarks/swe_bench/scripts/run_infer.sh`
 - Model and Agent can be configured via `OPENHANDS_MODEL_CONFIG`, `OPENHANDS_AGENT`
 - Single-instance runs use `EVAL_LIMIT=1`; exact filtering requires a pre-configured `config.toml`
+
+### Codex CLI Wrapper
+
+- Entry point: `agent-frameworks/codex/run_bench.py`
+- Requires a locally installed and authenticated `codex` CLI
+- Uses `--task-data` as the prompt-capable task source and `--task-csv` / `--subset-csv` only for ordering and filtering
+
+### Claude Code CLI Wrapper
+
+- Entry point: `agent-frameworks/claude-code/run_bench.py`
+- Requires a locally installed and authenticated `claude` CLI
+- Uses `--task-data` as the prompt-capable task source and `--task-csv` / `--subset-csv` only for ordering and filtering
 
 ## Output Structure
 

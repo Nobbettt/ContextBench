@@ -1,3 +1,7 @@
+.. SPDX-License-Identifier: Apache-2.0
+.. Fork note: Modified by Norbert Laszlo on 2026-03-16 from upstream ContextBench.
+.. Summary of changes: document fork-specific Codex CLI and Claude Code CLI trajectory extractors.
+
 Agent Trajectory Extractors
 ============================
 
@@ -31,7 +35,31 @@ Supported Agents
 - Only includes steps with explicit line ranges
 - Parses ``patch_context`` string format (``File:/Lines:``)
 
-3. Agentless
+3. Codex CLI
+~~~~~~~~
+
+- **Format**: ``*.codex-record.json``
+- **Location**: ``contextbench/agents/codex/extract.py``
+
+**Features**:
+
+- Extracts from the wrapper-produced Codex CLI record file
+- Uses reported retrieval steps when present
+- Falls back to touched files and diff-derived spans
+
+4. Claude Code CLI
+~~~~~~~~~
+
+- **Format**: ``*.claude-record.json``
+- **Location**: ``contextbench/agents/claude/extract.py``
+
+**Features**:
+
+- Extracts from the wrapper-produced Claude Code CLI record file
+- Uses reported retrieval steps when present
+- Falls back to touched files and diff-derived spans
+
+5. Agentless
 ~~~~~~~~~~~~
 
 - **Format**: Custom JSON format
@@ -43,7 +71,7 @@ Supported Agents
 - Parses file access from retrieval outputs
 - Supports multi-stage reasoning
 
-4. OpenHands
+6. OpenHands
 ~~~~~~~~~~~~
 
 - **Format**: Trajectory logs
@@ -55,7 +83,7 @@ Supported Agents
 - Supports browsing and editing actions
 - Handles multi-file contexts
 
-5. Prometheus
+7. Prometheus
 ~~~~~~~~~~~~~
 
 - **Format**: Agent-specific format

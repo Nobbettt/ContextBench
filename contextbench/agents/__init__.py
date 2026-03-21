@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+# Fork note: Modified by Norbert Laszlo on 2026-03-16 from upstream ContextBench.
+# Summary of changes: add Codex and Claude extractors to the unified agent interface.
+
 """Unified agent trajectory extraction interface."""
 
 from .minisweagent import extract_trajectory as extract_miniswe
@@ -5,6 +9,8 @@ from .sweagent import extract_trajectory as extract_swe
 from .agentless import extract_trajectory as extract_agentless
 from .prometheus import extract_trajectory as extract_prometheus
 from .openhands import extract_trajectory as extract_openhands
+from .codex import extract_trajectory as extract_codex
+from .claude import extract_trajectory as extract_claude
 
 
 def extract_trajectory(traj_file_or_data) -> dict:
@@ -47,6 +53,10 @@ def extract_trajectory(traj_file_or_data) -> dict:
         return extract_agentless(traj_file)
     elif traj_file.endswith('output.jsonl'):
         return extract_openhands(traj_file)
+    elif traj_file.endswith('.codex-record.json'):
+        return extract_codex(traj_file)
+    elif traj_file.endswith('.claude-record.json'):
+        return extract_claude(traj_file)
     elif traj_file.endswith('.log'):
         # Prometheus .log files can be very large and the context markers may not
         # appear in the first few KB. Let the Prometheus extractor decide.

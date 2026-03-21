@@ -1,3 +1,7 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Fork note: Modified by Norbert Laszlo on 2026-03-16 from upstream ContextBench. -->
+<!-- Summary of changes: document fork-specific Codex CLI and Claude Code CLI trajectory extractors. -->
+
 # Agent trajectory extractors
 
 This repo includes trajectory extractors for different coding agents, exposed via a unified API.
@@ -20,6 +24,22 @@ This repo includes trajectory extractors for different coding agents, exposed vi
   - Extracts from `str_replace_editor view` commands with `--view_range`
   - Only includes steps with explicit line ranges
   - Parses `patch_context` string format (File:/Lines:)
+
+### 3. Codex CLI
+- **Format**: `*.codex-record.json`
+- **Location**: `contextbench/agents/codex/extract.py`
+- **Notes**:
+  - Extracts unified trajectories from the wrapper-produced Codex CLI record file
+  - Uses reported retrieval steps when present
+  - Falls back to touched files and diff-derived spans
+
+### 4. Claude Code CLI
+- **Format**: `*.claude-record.json`
+- **Location**: `contextbench/agents/claude/extract.py`
+- **Notes**:
+  - Extracts unified trajectories from the wrapper-produced Claude Code CLI record file
+  - Uses reported retrieval steps when present
+  - Falls back to touched files and diff-derived spans
 
 ### Unified interface
 
@@ -48,5 +68,3 @@ python -m contextbench.evaluate \
     --pred traj_verified-mini/instance/instance.traj.json \
     --out results.jsonl
 ```
-
-

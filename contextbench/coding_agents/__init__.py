@@ -1,0 +1,101 @@
+# SPDX-License-Identifier: Apache-2.0
+
+"""Shared helpers for ContextBench coding-agent integrations."""
+
+from .constants import (
+    BENCH_LABEL_PREFIXES,
+    DEFAULT_CACHE_DIR,
+    DEFAULT_GOLD_PATH,
+    DEFAULT_OUTPUT_SCHEMA_PATH,
+    DEFAULT_PROMPT_FIELDS,
+    DEFAULT_RESULTS_ROOT,
+    DEFAULT_SUBSET_CSV,
+    FINAL_OUTPUT_REQUIRED_KEYS,
+    REPO_ROOT,
+)
+from .conversion import convert_records, convert_run_record, load_predictions_from_path, record_is_convertible
+from .files import (
+    append_jsonl,
+    ensure_dir,
+    read_json,
+    read_json_or_text,
+    read_jsonl,
+    read_jsonl_values,
+    safe_path_component,
+    usage_error,
+    write_json,
+)
+from .prompting import build_prompt
+from .records import (
+    build_task_record,
+    merge_span_maps,
+    normalize_retrieval_steps,
+    normalize_span_entry,
+    normalize_span_map,
+    normalize_symbol_map,
+    parse_unified_diff,
+)
+from .response_parsing import (
+    build_claude_raw_response,
+    build_codex_raw_response,
+    collect_nested_values,
+    extract_structured_output_from_json_file,
+    extract_structured_output_from_jsonl_file,
+    extract_structured_output_from_value,
+    is_structured_output_candidate,
+    parse_json_from_text,
+)
+from .task_data import detect_bench_from_instance_id, load_tasks, parse_bench_filter, parse_instance_filter
+from .types import ClaudeRawResponse, CodexRawResponse, CodingAgentRawResponse, LoadedTask, ServerToolUseCounts, TaskRecord, TokenUsage
+
+__all__ = [
+    "BENCH_LABEL_PREFIXES",
+    "DEFAULT_CACHE_DIR",
+    "DEFAULT_GOLD_PATH",
+    "DEFAULT_OUTPUT_SCHEMA_PATH",
+    "DEFAULT_PROMPT_FIELDS",
+    "DEFAULT_RESULTS_ROOT",
+    "DEFAULT_SUBSET_CSV",
+    "FINAL_OUTPUT_REQUIRED_KEYS",
+    "REPO_ROOT",
+    "append_jsonl",
+    "build_claude_raw_response",
+    "build_codex_raw_response",
+    "ClaudeRawResponse",
+    "CodexRawResponse",
+    "CodingAgentRawResponse",
+    "LoadedTask",
+    "build_prompt",
+    "build_task_record",
+    "collect_nested_values",
+    "convert_records",
+    "convert_run_record",
+    "detect_bench_from_instance_id",
+    "ensure_dir",
+    "extract_structured_output_from_json_file",
+    "extract_structured_output_from_jsonl_file",
+    "extract_structured_output_from_value",
+    "is_structured_output_candidate",
+    "load_predictions_from_path",
+    "load_tasks",
+    "merge_span_maps",
+    "normalize_retrieval_steps",
+    "normalize_span_entry",
+    "normalize_span_map",
+    "normalize_symbol_map",
+    "parse_bench_filter",
+    "parse_instance_filter",
+    "parse_json_from_text",
+    "parse_unified_diff",
+    "read_json",
+    "read_json_or_text",
+    "read_jsonl",
+    "read_jsonl_values",
+    "record_is_convertible",
+    "safe_path_component",
+    "ServerToolUseCounts",
+    "TaskRecord",
+    "TokenUsage",
+    "usage_error",
+    "write_json",
+]
