@@ -1,3 +1,7 @@
+.. SPDX-License-Identifier: Apache-2.0
+.. Fork note: Modified by Norbert Laszlo on 2026-03-22 from upstream ContextBench.
+.. Summary of changes: document Python-version-specific tree-sitter installation.
+
 Installation
 ============
 
@@ -27,11 +31,16 @@ Install Dependencies
 
    pip install -r requirements.txt
 
-**Critical**: Tree-sitter is required for symbol extraction. Ensure you have the correct versions:
+**Critical**: Tree-sitter is required for symbol extraction. Install the variant
+that matches your Python version:
 
 .. code-block:: bash
 
+   # Python 3.10-3.12
    pip install "tree-sitter==0.20.4" tree-sitter-languages
+
+   # Python 3.13+
+   pip install "tree-sitter>=0.24,<0.25" tree-sitter-language-pack
 
 Verify Installation
 -------------------
@@ -51,9 +60,10 @@ If you plan to contribute or modify the code:
 
 .. code-block:: bash
 
-   pip install -e .
+   pip install -e ".[dev]"
 
-This installs ContextBench in editable mode, allowing you to make changes without reinstalling.
+This installs ContextBench in editable mode with the development dependencies
+used by the local test suite.
 
 Troubleshooting
 ---------------

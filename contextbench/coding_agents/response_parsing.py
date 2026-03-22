@@ -94,13 +94,13 @@ def extract_structured_output_from_jsonl_file(path: Path) -> dict[str, object] |
     return latest
 
 
-def build_codex_raw_response(events_path: Path, final_output_path: Path) -> CodexRawResponse:
+def build_codex_raw_response(events_path: Path, final_output_path: Path | None) -> CodexRawResponse:
     raw_response: CodexRawResponse = {
         "agent": "codex",
         "response_format": "jsonl-events",
         "events": read_jsonl_values(events_path) if events_path.exists() else [],
     }
-    if final_output_path.exists():
+    if final_output_path and final_output_path.exists():
         raw_response["final_message"] = read_json_or_text(final_output_path)
     return raw_response
 

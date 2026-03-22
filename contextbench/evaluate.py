@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Fork note: Modified by Norbert Laszlo on 2026-03-22 from upstream ContextBench.
+# Summary of changes: update tree-sitter install hints for Python 3.13+.
 """
 Trajectory-based evaluation of context retrieval and edit localization.
 
@@ -21,6 +24,23 @@ from .core import checkout
 from .parsers import Gold, GoldLoader, load_pred, parse_trajectory, parse_diff
 from .extractors import extract_def_set_in_spans, extract_def_set_from_symbol_names
 from .metrics import compute_granularity_metrics, compute_trajectory_metrics, span_total_bytes, span_intersection_bytes, coverage_precision
+
+
+def _tree_sitter_install_command(version_info: Optional[Tuple[int, int]] = None) -> str:
+    """Return the install command matching the current Python version."""
+    if version_info is None:
+        version = (sys.version_info.major, sys.version_info.minor)
+    else:
+        version = tuple(version_info[:2])
+
+    if version >= (3, 13):
+        return 'pip install "tree-sitter>=0.24,<0.25" tree-sitter-language-pack'
+    return 'pip install "tree-sitter==0.20.4" tree-sitter-languages'
+
+
+def _print_tree_sitter_unavailable() -> None:
+    print("ERROR: Tree-sitter not available", file=sys.stderr)
+    print(f"Install with: {_tree_sitter_install_command()}", file=sys.stderr)
 
 
 def _is_repo_file(repo_dir: str, rel_path: str) -> bool:
@@ -458,8 +478,7 @@ def extract_gold_symbols_fullset(
     """Extract gold symbol sets for all gold instances and write JSONL."""
     from .extractors import available as ts_available
     if not ts_available():
-        print("ERROR: Tree-sitter not available", file=sys.stderr)
-        print("Install with: pip install tree-sitter tree-sitter-languages", file=sys.stderr)
+        _print_tree_sitter_unavailable()
         return 1
 
     gold_loader = GoldLoader(gold_path)
@@ -642,8 +661,7 @@ def main():
     # Check tree-sitter availability
     from .extractors import available as ts_available
     if not ts_available():
-        print("ERROR: Tree-sitter not available", file=sys.stderr)
-        print("Install with: pip install tree-sitter tree-sitter-languages", file=sys.stderr)
+        _print_tree_sitter_unavailable()
         sys.exit(1)
     
     print("Indexing gold contexts", file=sys.stderr)
@@ -710,4 +728,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

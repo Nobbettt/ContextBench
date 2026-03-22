@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
+# Fork note: Modified by Norbert Laszlo on 2026-03-22 from upstream ContextBench.
+# Summary of changes: add setup-run record helpers for unscored bootstrap prompts.
 
 """Record normalization helpers for coding-agent integrations."""
 
@@ -8,7 +10,18 @@ import re
 import time
 from pathlib import Path
 
-from .types import CommandResult, LineSpan, RetrievalStep, SpanMap, StructuredOutput, SymbolMap, TaskRecord, TokenUsage, ToolCall
+from .types import (
+    CommandResult,
+    LineSpan,
+    RetrievalStep,
+    SetupRunRecord,
+    SpanMap,
+    StructuredOutput,
+    SymbolMap,
+    TaskRecord,
+    TokenUsage,
+    ToolCall,
+)
 
 
 def _maybe_int(value: object) -> int | None:
@@ -145,8 +158,9 @@ def build_task_record(
     model_patch: str,
     started_at: float,
     completed_at: float,
+    setup_run: SetupRunRecord | None = None,
 ) -> TaskRecord:
-    return {
+    record: TaskRecord = {
         "agent": agent,
         "bench": task.get("bench"),
         "instance_id": task.get("instance_id"),
@@ -173,4 +187,35 @@ def build_task_record(
         "raw_response_path": str(raw_response_path) if raw_response_path else None,
         "diff_path": str(diff_path) if diff_path else None,
         "model_patch": model_patch,
+    }
+    if setup_run is not None:
+        record["setup_run"] = setup_run
+    return record
+
+
+def build_setup_run_record(
+    *,
+    prompt_path: Path,
+    stderr_path: Path,
+    command_result: CommandResult,
+    raw_response_path: Path | None,
+    token_usage: TokenUsage | None,
+    tool_calls: list[ToolCall] | None,
+    started_at: float,
+    completed_at: float,
+) -> SetupRunRecord:
+    return {
+        "prompt_path": str(prompt_path),
+        "stderr_path": str(stderr_path),
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started_at)),
+        "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(completed_at)),
+        "duration_ms": int((completed_at - started_at) * 1000),
+        "timeout": bool(command_result["timeout"]),
+        "exit_code": command_result["exit_code"],
+        "signal": command_result["signal"],
+        "ok": bool(command_result["ok"]),
+        "status": "timeout" if command_result["timeout"] else ("completed" if command_result["ok"] else "failed"),
+        "raw_response_path": str(raw_response_path) if raw_response_path else None,
+        "token_usage": token_usage,
+        "tool_calls": tool_calls or [],
     }

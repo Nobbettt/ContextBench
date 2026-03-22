@@ -1,7 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+# Fork note: Modified by Norbert Laszlo on 2026-03-22 from upstream ContextBench.
+# Summary of changes: add run-scoped worktree keys and explicit worktree cleanup helpers.
+
 """Git repository checkout management."""
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,6 +18,7 @@ def checkout(
     cache_dir: str,
     verbose: bool = True,
     sparse_paths: Optional[List[str]] = None,
+    workspace_key: str | None = None,
 ) -> Optional[str]:
     """
     Checkout repo at specific commit.
@@ -39,7 +45,12 @@ def checkout(
 
     tmp_root = os.environ.get("CONTEXTBENCH_TMP_ROOT") or tempfile.gettempdir()
     worktree_root = os.path.join(tmp_root, "contextbench_worktrees", repo_key)
-    worktree_dir = os.path.join(worktree_root, commit)
+    workspace_component = _normalize_workspace_key(workspace_key)
+    worktree_dir = (
+        os.path.join(worktree_root, commit, workspace_component)
+        if workspace_component
+        else os.path.join(worktree_root, commit)
+    )
 
     # Fast path: worktree already exists at the right commit
     if os.path.isdir(worktree_dir) and _verify_commit(worktree_dir, commit):
@@ -88,7 +99,7 @@ def checkout(
                 _ensure_sparse_checkout(worktree_dir, commit, sparse_list, verbose=verbose)
             return worktree_dir
 
-        os.makedirs(worktree_root, exist_ok=True)
+        os.makedirs(os.path.dirname(worktree_dir), exist_ok=True)
 
         # Create a detached worktree for the specific commit.
         wt_args = ["worktree", "add", "--detach"]
@@ -110,12 +121,50 @@ def checkout(
 
     return worktree_dir if _verify_commit(worktree_dir, commit) else None
 
+
+def remove_worktree(
+    repo_url: str,
+    cache_dir: str,
+    worktree_dir: str,
+    *,
+    verbose: bool = False,
+) -> None:
+    """Remove a detached worktree created by checkout()."""
+    if not repo_url or not cache_dir or not worktree_dir:
+        return
+    if not os.path.isdir(worktree_dir):
+        return
+
+    repo_key = _normalize_url(repo_url)
+    if os.path.isdir(repo_url) and os.path.isdir(os.path.join(repo_url, ".git")):
+        base_dir = repo_url
+    else:
+        base_dir = os.path.join(cache_dir, repo_key)
+    if not os.path.isdir(os.path.join(base_dir, ".git")):
+        shutil.rmtree(worktree_dir, ignore_errors=True)
+        return
+
+    lock_path = os.path.join(cache_dir, f"{repo_key}.lock")
+    with _file_lock(lock_path):
+        _git(["worktree", "remove", "--force", worktree_dir], cwd=base_dir, show_progress=verbose, timeout=600)
+        shutil.rmtree(worktree_dir, ignore_errors=True)
+        _git(["worktree", "prune"], cwd=base_dir, timeout=600)
+
 def _normalize_url(url: str) -> str:
     """Convert git URL to directory-safe name."""
     s = re.sub(r"^https?://", "", url.strip())
     s = re.sub(r"^git@", "", s).replace(":", "/").rstrip("/")
     s = s.replace("/", "__").replace(".git", "")
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", s) or "repo"
+
+
+def _normalize_workspace_key(workspace_key: str | None) -> str:
+    if workspace_key is None:
+        return ""
+    value = str(workspace_key).strip()
+    if not value:
+        return ""
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value) or ""
 
 class _file_lock:
     def __init__(self, path: str):

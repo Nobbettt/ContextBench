@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
+# Fork note: Modified by Norbert Laszlo on 2026-03-22 from upstream ContextBench.
+# Summary of changes: add setup-run metadata for unscored coding-agent bootstrap prompts.
 
 """Typed structures for coding-agent integration records."""
 
@@ -87,6 +89,22 @@ class ClaudeRawResponse(TypedDict):
 CodingAgentRawResponse = CodexRawResponse | ClaudeRawResponse
 
 
+class SetupRunRecord(TypedDict):
+    prompt_path: str
+    stderr_path: str
+    started_at: str
+    completed_at: str
+    duration_ms: int
+    timeout: bool
+    exit_code: int | None
+    signal: str | None
+    ok: bool
+    status: str
+    raw_response_path: str | None
+    token_usage: TokenUsage | None
+    tool_calls: list[ToolCall]
+
+
 class TaskRecord(TypedDict):
     agent: str
     bench: object
@@ -113,6 +131,7 @@ class TaskRecord(TypedDict):
     raw_response_path: str | None
     diff_path: str | None
     model_patch: str
+    setup_run: NotRequired[SetupRunRecord | None]
 
 
 class LoadedTask(TypedDict):
