@@ -10,6 +10,10 @@ import pytest
 
 from contextbench.run_suites import RunSuiteConfig, RunSuiteRunner, build_run_suite_variant
 from contextbench.coding_agents.files import safe_path_component
+from contextbench.coding_agents.constants import (
+    CLAUDE_OUTPUT_SCHEMA_PATH,
+    CODEX_OUTPUT_SCHEMA_PATH,
+)
 
 
 def _write_task_inputs(tmp_path: Path, *, count: int = 2) -> tuple[Path, Path]:
@@ -270,6 +274,63 @@ def test_run_suite_config_allows_codex_runtime_target_roots(tmp_path) -> None:
     )
 
     assert config.variants[0].setup.files_to_materialize[0].target_root == "xdg_config_home"
+
+
+def test_run_suite_config_defaults_schema_path_per_agent(tmp_path) -> None:
+    task_data, task_csv = _write_task_inputs(tmp_path, count=1)
+
+    codex = RunSuiteConfig.model_validate(
+        {
+            "experiment_name": "codex-default-schema",
+            "agent": "codex",
+            "base_run": {
+                "task_data": str(task_data),
+                "task_csv": str(task_csv),
+                "output_root": str(tmp_path / "results-codex"),
+                "repo_cache": str(tmp_path / "cache-codex"),
+            },
+            "variants": [{"name": "baseline"}],
+            "postprocess": {"convert": False, "evaluate": False},
+        }
+    )
+    claude = RunSuiteConfig.model_validate(
+        {
+            "experiment_name": "claude-default-schema",
+            "agent": "claude",
+            "base_run": {
+                "task_data": str(task_data),
+                "task_csv": str(task_csv),
+                "output_root": str(tmp_path / "results-claude"),
+                "repo_cache": str(tmp_path / "cache-claude"),
+            },
+            "variants": [{"name": "baseline"}],
+            "postprocess": {"convert": False, "evaluate": False},
+        }
+    )
+
+    assert codex.base_run.schema_path == CODEX_OUTPUT_SCHEMA_PATH
+    assert claude.base_run.schema_path == CLAUDE_OUTPUT_SCHEMA_PATH
+
+
+def test_run_suite_config_normalizes_agent_aliases(tmp_path) -> None:
+    task_data, task_csv = _write_task_inputs(tmp_path, count=1)
+    config = RunSuiteConfig.model_validate(
+        {
+            "experiment_name": "claude-alias-schema",
+            "agent": "claude-code",
+            "base_run": {
+                "task_data": str(task_data),
+                "task_csv": str(task_csv),
+                "output_root": str(tmp_path / "results-claude"),
+                "repo_cache": str(tmp_path / "cache-claude"),
+            },
+            "variants": [{"name": "baseline"}],
+            "postprocess": {"convert": False, "evaluate": False},
+        }
+    )
+
+    assert config.agent == "claude"
+    assert config.base_run.schema_path == CLAUDE_OUTPUT_SCHEMA_PATH
 
 
 def test_dependency_metadata_includes_pydantic_runtime_requirement() -> None:

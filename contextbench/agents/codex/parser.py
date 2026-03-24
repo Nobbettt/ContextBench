@@ -6,7 +6,8 @@ from __future__ import annotations
 
 from ..base import BaseCodingAgentParser
 from ...coding_agents.response_parsing import extract_structured_output_from_value
-from ...coding_agents.types import CodexRawResponse, StructuredOutput, TokenUsage, ToolCall
+from ...coding_agents.trace_inference import infer_retrieval_step_from_command, trajectory_from_steps
+from ...coding_agents.types import CodexRawResponse, StructuredOutput, TokenUsage, ToolCall, TrajectoryData
 
 
 class CodexAgentParser(BaseCodingAgentParser):
@@ -80,3 +81,52 @@ class CodexAgentParser(BaseCodingAgentParser):
                 }
             )
         return calls
+
+    def infer_trajectory_data(
+        self,
+        raw_response: CodexRawResponse,
+        *,
+        record: dict[str, object],
+    ) -> TrajectoryData | None:
+        if not isinstance(raw_response, dict):
+            return None
+        events = raw_response.get("events")
+        if not isinstance(events, list):
+            return None
+        workspace_path_value = str(record.get("workspace_path") or "").strip()
+        if not workspace_path_value:
+            return None
+        from pathlib import Path
+
+        workspace_path = Path(workspace_path_value)
+        steps = []
+        changed_files: set[str] = set()
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            if event.get("type") != "item.completed":
+                continue
+            item = event.get("item")
+            if not isinstance(item, dict):
+                continue
+            item_type = str(item.get("type") or "")
+            if item_type == "command_execution":
+                command = str(item.get("command") or "")
+                output_text = str(item.get("aggregated_output") or "")
+                step = infer_retrieval_step_from_command(command, output_text=output_text, workspace_path=workspace_path)
+                if step:
+                    steps.append(step)
+                continue
+            if item_type != "file_change":
+                continue
+            for change in item.get("changes") or []:
+                if not isinstance(change, dict):
+                    continue
+                path_value = str(change.get("path") or "").strip()
+                if not path_value:
+                    continue
+                from ...coding_agents.trace_inference import normalize_workspace_path
+
+                changed_files.add(normalize_workspace_path(path_value, workspace_path))
+
+        return trajectory_from_steps(steps, fallback_files=sorted(changed_files))

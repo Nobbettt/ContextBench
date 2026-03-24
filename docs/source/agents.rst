@@ -10,6 +10,12 @@ ContextBench includes trajectory extractors for different coding agents, exposed
 Supported Agents
 ----------------
 
+.. toctree::
+   :maxdepth: 1
+
+   agents/codex
+   agents/claude
+
 1. MiniSWE-agent
 ~~~~~~~~~~~~~~~~
 

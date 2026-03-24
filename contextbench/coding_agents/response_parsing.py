@@ -8,7 +8,7 @@ import json
 import re
 from pathlib import Path
 
-from .constants import FINAL_OUTPUT_REQUIRED_KEYS
+from .constants import RICH_OUTPUT_KEYS, SEMANTIC_OUTPUT_KEYS
 from .files import read_json, read_json_or_text, read_jsonl_values
 from .types import ClaudeRawResponse, CodexRawResponse, StructuredOutput
 
@@ -51,7 +51,10 @@ def collect_nested_values(value: object, depth: int = 0) -> list[object]:
 
 
 def is_structured_output_candidate(value: object) -> bool:
-    return isinstance(value, dict) and all(key in value for key in FINAL_OUTPUT_REQUIRED_KEYS)
+    return isinstance(value, dict) and (
+        all(key in value for key in RICH_OUTPUT_KEYS)
+        or all(key in value for key in SEMANTIC_OUTPUT_KEYS)
+    )
 
 
 def extract_structured_output_from_value(value: object) -> StructuredOutput | None:

@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from contextbench.coding_agents.constants import CODEX_OUTPUT_SCHEMA_PATH
+
 FIXTURES_ROOT = Path(__file__).parent / "fixtures" / "coding_agents"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -75,7 +77,7 @@ def make_record(make_final_output):
 
 @pytest.fixture
 def schema_path() -> Path:
-    return Path("contextbench/schemas/coding_agent_output.schema.json").resolve()
+    return CODEX_OUTPUT_SCHEMA_PATH.resolve()
 
 
 @pytest.fixture

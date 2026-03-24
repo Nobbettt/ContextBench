@@ -6,7 +6,15 @@ from __future__ import annotations
 
 from ..base import BaseCodingAgentParser
 from ...coding_agents.response_parsing import extract_structured_output_from_value, parse_json_from_text
-from ...coding_agents.types import ClaudeRawResponse, StructuredOutput, TokenUsage, ToolCall
+from ...coding_agents.trace_inference import (
+    infer_read_step,
+    infer_retrieval_step_from_command,
+    infer_grep_spans_from_text,
+    infer_file_list_from_text,
+    normalize_workspace_path,
+    trajectory_from_steps,
+)
+from ...coding_agents.types import ClaudeRawResponse, StructuredOutput, TokenUsage, ToolCall, TrajectoryData
 
 
 class ClaudeAgentParser(BaseCodingAgentParser):
@@ -113,3 +121,88 @@ class ClaudeAgentParser(BaseCodingAgentParser):
                 }
             ]
         return []
+
+    def infer_trajectory_data(
+        self,
+        raw_response: ClaudeRawResponse,
+        *,
+        record: dict[str, object],
+    ) -> TrajectoryData | None:
+        if not isinstance(raw_response, dict):
+            return None
+        response = raw_response.get("response")
+        if not isinstance(response, list):
+            return None
+        workspace_path_value = str(record.get("workspace_path") or "").strip()
+        if not workspace_path_value:
+            return None
+        from pathlib import Path
+
+        workspace_path = Path(workspace_path_value)
+        steps = []
+        changed_files: set[str] = set()
+        pending_tools: dict[str, tuple[str, dict[str, object]]] = {}
+
+        for item in response:
+            if not isinstance(item, dict):
+                continue
+            item_type = item.get("type")
+            if item_type == "assistant":
+                message = item.get("message")
+                if not isinstance(message, dict):
+                    continue
+                for content in message.get("content", []):
+                    if not isinstance(content, dict) or content.get("type") != "tool_use":
+                        continue
+                    tool_id = str(content.get("id") or "").strip()
+                    tool_name = str(content.get("name") or "").strip()
+                    tool_input = content.get("input")
+                    if tool_id and isinstance(tool_input, dict):
+                        pending_tools[tool_id] = (tool_name, dict(tool_input))
+                        if tool_name in {"Edit", "Write"}:
+                            file_path = str(tool_input.get("file_path") or "").strip()
+                            if file_path:
+                                changed_files.add(normalize_workspace_path(file_path, workspace_path))
+                continue
+
+            if item_type != "user":
+                continue
+            message = item.get("message")
+            if not isinstance(message, dict):
+                continue
+            for content in message.get("content", []):
+                if not isinstance(content, dict) or content.get("type") != "tool_result":
+                    continue
+                tool_use_id = str(content.get("tool_use_id") or "").strip()
+                tool_payload = pending_tools.get(tool_use_id)
+                if not tool_payload:
+                    continue
+                tool_name, tool_input = tool_payload
+                output_text = str(content.get("content") or "")
+                if tool_name == "Read":
+                    file_path = str(tool_input.get("file_path") or "").strip()
+                    if file_path:
+                        steps.append(infer_read_step(file_path, output_text=output_text, workspace_path=workspace_path))
+                    continue
+                if tool_name == "Grep":
+                    spans = infer_grep_spans_from_text(output_text, workspace_path)
+                    files = sorted(spans)
+                    if not files:
+                        path_value = str(tool_input.get("path") or "").strip()
+                        if path_value and "." in Path(path_value).name:
+                            files = [normalize_workspace_path(path_value, workspace_path)]
+                            if files[0] not in spans:
+                                spans = infer_grep_spans_from_text(output_text, workspace_path)
+                        else:
+                            files = infer_file_list_from_text(output_text, workspace_path)
+                    if files or spans:
+                        steps.append({"files": files, "spans": spans, "symbols": {}})
+                    continue
+                if tool_name == "Bash":
+                    command = str(tool_input.get("command") or "")
+                    step = infer_retrieval_step_from_command(command, output_text=output_text, workspace_path=workspace_path)
+                    if step:
+                        steps.append(step)
+                    continue
+
+        return trajectory_from_steps(steps, fallback_files=sorted(changed_files))

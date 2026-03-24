@@ -79,6 +79,91 @@ def test_convert_run_record_falls_back_to_diff_and_touched_files(make_final_outp
     assert converted["traj_data"]["pred_spans"] == {"requests/api.py": [{"start": 5, "end": 7}]}
 
 
+def test_convert_run_record_accepts_minimal_final_output() -> None:
+    record = {
+        "agent": "codex",
+        "instance_id": "psf__requests-1142",
+        "repo_url": "https://github.com/psf/requests.git",
+        "workspace_path": "/tmp/workspace",
+        "model_patch": """diff --git a/requests/api.py b/requests/api.py
+--- a/requests/api.py
++++ b/requests/api.py
+@@ -5,0 +5,3 @@
++x
+""",
+        "final_output": {
+            "task_id": "psf__requests-1142",
+            "status": "completed",
+            "final_answer": "done",
+            "retrieved_context_files": ["requests/models.py"],
+            "retrieved_context_spans": [{"file": "requests/models.py", "start": 1, "end": 20}],
+            "retrieved_context_symbols": [],
+            "notes": "",
+        },
+    }
+
+    converted = convert_run_record(record)
+
+    assert converted["traj_data"]["pred_files"] == ["requests/models.py"]
+    assert converted["traj_data"]["pred_spans"]["requests/api.py"][0]["start"] == 5
+    assert converted["traj_data"]["pred_spans"]["requests/models.py"][0]["start"] == 1
+
+
+def test_convert_run_record_merges_inferred_and_reported_retrieval() -> None:
+    record = {
+        "agent": "codex",
+        "instance_id": "task-1",
+        "workspace_path": "/tmp/workspace",
+        "repo_url": "https://github.com/example/repo.git",
+        "commit": "abc123",
+        "raw_response": {
+            "agent": "codex",
+            "response_format": "jsonl-events",
+            "events": [
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "id": "item_1",
+                        "type": "command_execution",
+                        "command": "/bin/zsh -lc 'rg -n \"fill_value\" sklearn/impute/_iterative.py'",
+                        "aggregated_output": "sklearn/impute/_iterative.py:120:    fill_value : str or numerical value, default=None\n",
+                        "exit_code": 0,
+                        "status": "completed",
+                    },
+                }
+            ],
+        },
+        "model_patch": "",
+        "final_output": {
+            "task_id": "task-1",
+            "status": "completed",
+            "final_answer": "done",
+            "touched_files": [],
+            "retrieval_steps": [
+                {
+                    "files": ["sklearn/impute/tests/test_impute.py"],
+                    "spans": [{"file": "sklearn/impute/tests/test_impute.py", "start": 10, "end": 20}],
+                    "symbols": [],
+                }
+            ],
+            "retrieved_context_files": ["sklearn/impute/tests/test_impute.py"],
+            "retrieved_context_spans": [{"file": "sklearn/impute/tests/test_impute.py", "start": 10, "end": 20}],
+            "retrieved_context_symbols": [],
+            "notes": "",
+        },
+    }
+
+    converted = convert_run_record(record)
+
+    assert converted["traj_data"]["pred_files"] == [
+        "sklearn/impute/_iterative.py",
+        "sklearn/impute/tests/test_impute.py",
+    ]
+    assert converted["traj_data"]["pred_spans"]["sklearn/impute/_iterative.py"][0]["start"] == 120
+    assert converted["traj_data"]["pred_spans"]["sklearn/impute/tests/test_impute.py"][0]["start"] == 10
+    assert len(converted["traj_data"]["pred_steps"]) == 2
+
+
 def test_load_predictions_from_directory_filters_agent(tmp_path, make_final_output, make_record) -> None:
     records_path = tmp_path / "records.jsonl"
     records_path.write_text(

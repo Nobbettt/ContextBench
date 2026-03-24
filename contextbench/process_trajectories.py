@@ -32,6 +32,7 @@ import sys
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
+from contextbench.agents.registry import has_coding_agent_adapter, normalize_coding_agent_name
 from contextbench.coding_agents.conversion import load_predictions_from_path
 
 
@@ -81,10 +82,9 @@ def _load_agentless_dir(instance_dir: Path) -> dict:
 def _load_path(path: str, agent: Optional[str] = None) -> List[dict]:
     """Load trajectory from path; handles files, OpenHands dirs, and agentless instance dirs."""
     p = Path(path)
-    normalized_agent = agent.lower().replace("_", "-") if agent else None
-    if normalized_agent in ("codex", "claude", "claude-code"):
-        expected_agent = "claude" if normalized_agent == "claude-code" else normalized_agent
-        return load_predictions_from_path(p, expected_agent=expected_agent)
+    normalized_agent = normalize_coding_agent_name(agent.lower().replace("_", "-")) if agent else None
+    if normalized_agent and has_coding_agent_adapter(normalized_agent):
+        return load_predictions_from_path(p, expected_agent=normalized_agent)
     if p.is_dir():
         if agent == "agentless":
             try:
@@ -295,7 +295,7 @@ def cmd_convert(args: argparse.Namespace) -> int:
                         written += 1
                 except Exception as e:
                     print(f"  Warning: {inp}: {e}", file=sys.stderr)
-        elif agent in ("codex", "claude", "claude-code"):
+        elif has_coding_agent_adapter(agent):
             for inp in inputs:
                 try:
                     preds = _load_path(str(inp), agent=agent)

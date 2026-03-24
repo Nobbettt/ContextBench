@@ -9,10 +9,10 @@ from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from ..agents.registry import get_coding_agent_adapter, iter_coding_agent_adapters, normalize_coding_agent_name
 from ..coding_agents.constants import (
     DEFAULT_CACHE_DIR,
     DEFAULT_GOLD_PATH,
-    DEFAULT_OUTPUT_SCHEMA_PATH,
     DEFAULT_SUBSET_CSV,
     REPO_ROOT,
 )
@@ -40,14 +40,7 @@ ReasoningLevel = Literal[
 
 SUPPORTED_RUNTIME_TARGET_ROOTS: frozenset[str] = frozenset(get_args(RuntimeTargetRoot))
 SUPPORTED_REASONING_LEVELS: frozenset[str] = frozenset(get_args(ReasoningLevel))
-AGENT_RUNTIME_TARGET_ROOTS: dict[str, frozenset[str]] = {
-    "codex": SUPPORTED_RUNTIME_TARGET_ROOTS,
-    "claude": frozenset({"task_dir", "runtime_root"}),
-}
-AGENT_REASONING_LEVELS: dict[str, frozenset[str]] = {
-    "codex": SUPPORTED_REASONING_LEVELS,
-    "claude": frozenset({"low", "medium", "high", "xhigh"}),
-}
+SUPPORTED_CODING_AGENTS: frozenset[str] = frozenset(adapter.name for adapter in iter_coding_agent_adapters())
 
 
 class MaterializedFileConfig(BaseModel):
@@ -99,7 +92,7 @@ class BaseRunConfig(BaseModel):
     timeout: int = Field(default=1800, gt=0)
     repo_cache: Path = DEFAULT_CACHE_DIR
     output_root: Path = REPO_ROOT / "results" / "run_suites"
-    schema_path: Path = DEFAULT_OUTPUT_SCHEMA_PATH
+    schema_path: Path | None = None
     model: str | None = None
     reasoning_effort: ReasoningLevel | None = None
     rerun: bool = False
@@ -181,7 +174,7 @@ class RunSuiteConfig(BaseModel):
 
     experiment_name: str
     description: str | None = None
-    agent: Literal["codex", "claude"]
+    agent: str
     base_run: BaseRunConfig = Field(default_factory=BaseRunConfig)
     variants: list[VariantConfig]
     parallelism: ParallelismConfig = Field(default_factory=ParallelismConfig)
@@ -195,10 +188,21 @@ class RunSuiteConfig(BaseModel):
             raise ValueError("Experiment name must be non-empty")
         return name
 
+    @field_validator("agent", mode="before")
+    @classmethod
+    def normalize_agent(cls, value: object) -> str:
+        normalized = normalize_coding_agent_name(value)
+        if normalized is None:
+            available = ", ".join(sorted(SUPPORTED_CODING_AGENTS))
+            raise ValueError(f"Unsupported coding agent adapter: {value!r}. Available: {available}")
+        return normalized
+
     @model_validator(mode="after")
     def validate_variants(self) -> "RunSuiteConfig":
         if not self.variants:
             raise ValueError("At least one variant is required")
+        if self.base_run.schema_path is None:
+            self.base_run.schema_path = get_coding_agent_adapter(self.agent).output_schema_path
         names = [variant.name for variant in self.variants]
         if len(names) != len(set(names)):
             raise ValueError("Variant names must be unique")
@@ -213,7 +217,7 @@ class RunSuiteConfig(BaseModel):
         return self
 
     def _validate_setup_target_roots(self, setup: VariantSetupConfig, *, location: str) -> None:
-        allowed_roots = AGENT_RUNTIME_TARGET_ROOTS[self.agent]
+        allowed_roots = get_coding_agent_adapter(self.agent).supported_runtime_target_roots
         invalid_entries: list[str] = []
 
         for index, spec in enumerate(setup.copy_paths):
@@ -233,7 +237,7 @@ class RunSuiteConfig(BaseModel):
     def _validate_reasoning_effort(self, reasoning_effort: ReasoningLevel | None, *, location: str) -> None:
         if reasoning_effort is None:
             return
-        allowed_levels = AGENT_REASONING_LEVELS[self.agent]
+        allowed_levels = get_coding_agent_adapter(self.agent).supported_reasoning_efforts
         if reasoning_effort not in allowed_levels:
             allowed_display = ", ".join(sorted(allowed_levels))
             raise ValueError(
@@ -250,7 +254,7 @@ class EffectiveVariantConfig(BaseModel):
     description: str | None = None
     labels: list[str] = Field(default_factory=list)
     notes: str | None = None
-    agent: Literal["codex", "claude"]
+    agent: str
     task_data: Path
     task_csv: Path | None = None
     subset_csv: Path | None = None
@@ -259,9 +263,18 @@ class EffectiveVariantConfig(BaseModel):
     limit: int = 0
     timeout: int = 1800
     repo_cache: Path = DEFAULT_CACHE_DIR
-    schema_path: Path = DEFAULT_OUTPUT_SCHEMA_PATH
+    schema_path: Path
     model: str | None = None
     reasoning_effort: ReasoningLevel | None = None
     env: dict[str, str] = Field(default_factory=dict)
     agent_args: list[str] = Field(default_factory=list)
     setup: VariantSetupConfig = Field(default_factory=VariantSetupConfig)
+
+    @field_validator("agent", mode="before")
+    @classmethod
+    def normalize_agent(cls, value: object) -> str:
+        normalized = normalize_coding_agent_name(value)
+        if normalized is None:
+            available = ", ".join(sorted(SUPPORTED_CODING_AGENTS))
+            raise ValueError(f"Unsupported coding agent adapter: {value!r}. Available: {available}")
+        return normalized

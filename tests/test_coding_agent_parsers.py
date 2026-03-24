@@ -12,8 +12,10 @@ from contextbench.agents.codex import CodexAgentParser
 from contextbench.coding_agents import (
     build_claude_raw_response,
     build_codex_raw_response,
+    convert_run_record,
     extract_structured_output_from_value,
 )
+from contextbench.coding_agents.trace_inference import trajectory_from_steps
 
 
 def test_extract_structured_output_from_nested_value() -> None:
@@ -21,11 +23,8 @@ def test_extract_structured_output_from_nested_value() -> None:
         "result": {
             "content": json.dumps(
                 {
-                    "task_id": "task-1",
                     "status": "completed",
                     "final_answer": "done",
-                    "touched_files": [],
-                    "retrieval_steps": [],
                     "retrieved_context_files": [],
                     "retrieved_context_spans": [],
                     "retrieved_context_symbols": [],
@@ -38,7 +37,7 @@ def test_extract_structured_output_from_nested_value() -> None:
     structured = extract_structured_output_from_value(payload)
 
     assert structured is not None
-    assert structured["task_id"] == "task-1"
+    assert structured["status"] == "completed"
 
 
 def test_extract_structured_output_from_invalid_value_returns_none() -> None:
@@ -259,6 +258,22 @@ def test_observed_fixture_outputs_match_schema(fixtures_root, output_schema) -> 
     jsonschema.validate(claude_structured, output_schema)
 
 
+def test_extract_structured_output_accepts_minimal_payload() -> None:
+    payload = {
+        "status": "completed",
+        "final_answer": "done",
+        "retrieved_context_files": ["a.py"],
+        "retrieved_context_spans": [],
+        "retrieved_context_symbols": [],
+        "notes": "",
+    }
+
+    structured = extract_structured_output_from_value(payload)
+
+    assert structured is not None
+    assert structured["final_answer"] == "done"
+
+
 def test_parser_normalize_record_uses_raw_response_path(tmp_path, fixtures_root) -> None:
     raw_path = tmp_path / "raw-response.json"
     raw_path.write_text((fixtures_root / "codex" / "raw_response.json").read_text(encoding="utf-8"), encoding="utf-8")
@@ -280,3 +295,232 @@ def test_parser_normalize_record_uses_raw_response_path(tmp_path, fixtures_root)
     assert normalized["final_output"]["task_id"] == "task-1"
     assert normalized["token_usage"]["input_tokens"] == 12667
     assert normalized["tool_calls"][0]["tool_name"] == "repo.search"
+
+
+def test_codex_parser_infers_trajectory_from_command_events() -> None:
+    parser = CodexAgentParser()
+    raw_response = {
+        "agent": "codex",
+        "response_format": "jsonl-events",
+        "events": [
+            {"type": "thread.started"},
+            {"type": "turn.started"},
+            {
+                "type": "item.completed",
+                "item": {
+                    "id": "item_1",
+                    "type": "command_execution",
+                    "command": "/bin/zsh -lc 'rg -n \"fill_value\" sklearn/impute/_iterative.py'",
+                    "aggregated_output": "sklearn/impute/_iterative.py:120:    fill_value : str or numerical value, default=None\n",
+                    "exit_code": 0,
+                    "status": "completed",
+                },
+            },
+            {
+                "type": "item.completed",
+                "item": {
+                    "id": "item_2",
+                    "type": "command_execution",
+                    "command": "/bin/zsh -lc \"nl -ba sklearn/impute/_iterative.py | sed -n '115,123p'\"",
+                    "aggregated_output": "   115→    initial_strategy : {'mean', 'median', 'most_frequent', 'constant'}, \\\n   123→        passed to :class:`~sklearn.impute.SimpleImputer`.\n",
+                    "exit_code": 0,
+                    "status": "completed",
+                },
+            },
+            {
+                "type": "item.completed",
+                "item": {
+                    "id": "item_3",
+                    "type": "file_change",
+                    "changes": [
+                        {"path": "/tmp/workspace/sklearn/impute/_iterative.py", "kind": "update"},
+                    ],
+                    "status": "completed",
+                },
+            },
+        ],
+    }
+    record = {
+        "agent": "codex",
+        "instance_id": "task-1",
+        "workspace_path": "/tmp/workspace",
+        "final_output": {
+            "task_id": "task-1",
+            "status": "completed",
+            "final_answer": "done",
+            "touched_files": [],
+            "retrieval_steps": [],
+            "retrieved_context_files": [],
+            "retrieved_context_spans": [],
+            "retrieved_context_symbols": [],
+            "notes": "",
+        },
+        "raw_response": raw_response,
+        "model_patch": "",
+    }
+
+    traj = parser.infer_trajectory_data(raw_response, record=record)
+
+    assert traj is not None
+    assert traj["pred_files"] == ["sklearn/impute/_iterative.py"]
+    assert traj["pred_spans"]["sklearn/impute/_iterative.py"][0]["start"] == 120
+    assert traj["pred_spans"]["sklearn/impute/_iterative.py"][-1]["end"] == 123
+
+
+def test_claude_parser_infers_trajectory_from_verbose_tool_history() -> None:
+    parser = ClaudeAgentParser()
+    raw_response = {
+        "agent": "claude",
+        "response_format": "json",
+        "response": [
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "grep-1",
+                            "name": "Grep",
+                            "input": {
+                                "pattern": "fill_value",
+                                "path": "/tmp/workspace/sklearn/impute/_iterative.py",
+                                "output_mode": "content",
+                            },
+                        }
+                    ]
+                },
+            },
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "grep-1",
+                            "content": "120:    fill_value : str or numerical value, default=None\n",
+                        }
+                    ]
+                },
+            },
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "read-1",
+                            "name": "Read",
+                            "input": {"file_path": "/tmp/workspace/sklearn/impute/_iterative.py"},
+                        }
+                    ]
+                },
+            },
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "read-1",
+                            "content": "   115→    initial_strategy : {'mean', 'median'}\n   123→        passed to :class:`~sklearn.impute.SimpleImputer`.\n",
+                        }
+                    ]
+                },
+            },
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "edit-1",
+                            "name": "Edit",
+                            "input": {"file_path": "/tmp/workspace/sklearn/impute/_iterative.py"},
+                        }
+                    ]
+                },
+            },
+        ],
+    }
+    record = {
+        "agent": "claude",
+        "instance_id": "task-1",
+        "workspace_path": "/tmp/workspace",
+        "final_output": {
+            "task_id": "task-1",
+            "status": "completed",
+            "final_answer": "done",
+            "touched_files": [],
+            "retrieval_steps": [],
+            "retrieved_context_files": [],
+            "retrieved_context_spans": [],
+            "retrieved_context_symbols": [],
+            "notes": "",
+        },
+        "raw_response": raw_response,
+        "model_patch": "",
+    }
+
+    traj = parser.infer_trajectory_data(raw_response, record=record)
+
+    assert traj is not None
+    assert traj["pred_files"] == ["sklearn/impute/_iterative.py"]
+    assert traj["pred_spans"]["sklearn/impute/_iterative.py"][0]["start"] == 115
+    assert traj["pred_spans"]["sklearn/impute/_iterative.py"][-1]["end"] == 123
+
+
+def test_convert_run_record_uses_inferred_codex_trajectory_when_schema_retrieval_empty() -> None:
+    raw_response = {
+        "agent": "codex",
+        "response_format": "jsonl-events",
+        "events": [
+            {
+                "type": "item.completed",
+                "item": {
+                    "id": "item_1",
+                    "type": "command_execution",
+                    "command": "/bin/zsh -lc 'rg -n \"fill_value\" sklearn/impute/_iterative.py'",
+                    "aggregated_output": "sklearn/impute/_iterative.py:120:    fill_value : str or numerical value, default=None\n",
+                    "exit_code": 0,
+                    "status": "completed",
+                },
+            }
+        ],
+    }
+    record = {
+        "agent": "codex",
+        "instance_id": "task-1",
+        "workspace_path": "/tmp/workspace",
+        "repo_url": "https://github.com/example/repo.git",
+        "commit": "abc123",
+        "final_output": {
+            "task_id": "task-1",
+            "status": "completed",
+            "final_answer": "done",
+            "touched_files": [],
+            "retrieval_steps": [],
+            "retrieved_context_files": [],
+            "retrieved_context_spans": [],
+            "retrieved_context_symbols": [],
+            "notes": "",
+        },
+        "raw_response": raw_response,
+        "model_patch": "",
+    }
+
+    converted = convert_run_record(record)
+
+    assert converted["traj_data"]["pred_files"] == ["sklearn/impute/_iterative.py"]
+    assert converted["traj_data"]["pred_spans"]["sklearn/impute/_iterative.py"][0]["start"] == 120
+
+
+def test_trajectory_from_steps_prefers_grounded_files_over_search_only_files() -> None:
+    traj = trajectory_from_steps(
+        [
+            {"files": ["a.py", "b.py", "c.py"], "spans": {}, "symbols": {}},
+            {"files": ["core.py"], "spans": {"core.py": [{"start": 10, "end": 20}]}, "symbols": {}},
+        ]
+    )
+
+    assert traj is not None
+    assert traj["pred_files"] == ["core.py"]

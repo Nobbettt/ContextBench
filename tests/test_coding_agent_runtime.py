@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from contextbench.coding_agents import build_prompt
+from contextbench.coding_agents.constants import CODEX_OUTPUT_SCHEMA_PATH
 from contextbench.coding_agents.runtime import (
     build_claude_command,
     build_codex_command,
@@ -22,7 +23,7 @@ from contextbench.coding_agents.runtime import (
 )
 
 
-def test_build_prompt_mentions_local_only_constraints() -> None:
+def test_build_prompt_uses_pr_description_and_workflow_scaffold() -> None:
     prompt = build_prompt(
         {
             "bench": "Verified",
@@ -33,8 +34,36 @@ def test_build_prompt_mentions_local_only_constraints() -> None:
         "codex",
     )
 
-    assert "Do not use web search or external sources." in prompt
+    assert "Consider the following PR description:" in prompt
+    assert "Work inside the checked-out repository workspace for this task." in prompt
+    assert "Populate these fields carefully: status, final_answer, notes, and the final repository context you relied on most." in prompt
+    assert "You may leave retrieval_steps empty if you do not have a concise chronological summary." in prompt
     assert "Fix the bug." in prompt
+
+
+def test_build_prompt_dispatches_agent_specific_identity() -> None:
+    codex_prompt = build_prompt(
+        {"bench": "Verified", "instance_id": "task-1", "prompt": "Fix it."},
+        "codex",
+    )
+    claude_prompt = build_prompt(
+        {"bench": "Verified", "instance_id": "task-1", "prompt": "Fix it."},
+        "claude",
+    )
+
+    assert "Task ID:" not in codex_prompt
+    assert "Task ID:" not in claude_prompt
+    assert "Agent:" not in codex_prompt
+    assert "Agent:" not in claude_prompt
+
+
+def test_build_prompt_accepts_agent_aliases() -> None:
+    prompt = build_prompt(
+        {"bench": "Verified", "instance_id": "task-1", "prompt": "Fix it."},
+        "claude-code",
+    )
+
+    assert "Consider the following PR description:" in prompt
 
 
 def test_run_module_supports_codex_dry_run_with_task_data(tmp_path) -> None:
@@ -387,7 +416,7 @@ def test_run_coding_agent_task_codex_writes_record_and_diff(tmp_path, monkeypatc
     workspace_path.mkdir()
     output_dir = Path("results")
     cache_dir = Path("cache")
-    schema_path = Path("contextbench/schemas/coding_agent_output.schema.json").resolve()
+    schema_path = CODEX_OUTPUT_SCHEMA_PATH.resolve()
     task = {
         "bench": "Verified",
         "instance_id": "task-1",
@@ -402,11 +431,11 @@ def test_run_coding_agent_task_codex_writes_record_and_diff(tmp_path, monkeypatc
     monkeypatch.setattr("contextbench.coding_agents.runtime.checkout", lambda *args, **kwargs: str(workspace_path))
     monkeypatch.setattr("contextbench.coding_agents.runtime.reset_workspace", lambda path: None)
     monkeypatch.setattr(
-        "contextbench.coding_agents.runtime.prepare_codex_runtime_env",
+        "contextbench.agents.codex.runtime.prepare_runtime_env",
         lambda task_dir, **kwargs: {"HOME": str(task_dir)},
     )
     monkeypatch.setattr(
-        "contextbench.coding_agents.runtime.build_codex_command",
+        "contextbench.agents.codex.runtime.build_command",
         lambda **kwargs: (
             captured.setdefault("final_output_path", kwargs["final_output_path"])
             and captured.setdefault("reasoning_effort", kwargs["reasoning_effort"])
@@ -435,7 +464,7 @@ def test_run_coding_agent_task_codex_writes_record_and_diff(tmp_path, monkeypatc
         )
         return {"ok": True, "exit_code": 0, "signal": None, "timeout": False}
 
-    monkeypatch.setattr("contextbench.coding_agents.runtime.run_command", fake_run_command)
+    monkeypatch.setattr("contextbench.agents.codex.runtime.run_command", fake_run_command)
 
     record = run_coding_agent_task(
         task=task,
@@ -461,7 +490,9 @@ def test_run_coding_agent_task_codex_writes_record_and_diff(tmp_path, monkeypatc
     assert record_path.exists()
     prompt_text = (task_dir / "prompt.txt").read_text(encoding="utf-8")
     assert prompt_text.startswith("Variant instructions")
-    assert "You are running a ContextBench task" in prompt_text
+    assert "Consider the following PR description:" in prompt_text
+    assert "Work inside the checked-out repository workspace for this task." in prompt_text
+    assert "You may leave touched_files empty if uncertain; actual file changes can be inferred from the repository diff." in prompt_text
     assert captured["reasoning_effort"] == "high"
     assert isinstance(captured["final_output_path"], Path)
     assert captured["final_output_path"].is_absolute()
@@ -476,7 +507,7 @@ def test_run_coding_agent_task_codex_retries_transient_failure(tmp_path, monkeyp
     workspace_path.mkdir()
     output_dir = tmp_path / "results"
     cache_dir = tmp_path / "cache"
-    schema_path = Path("contextbench/schemas/coding_agent_output.schema.json").resolve()
+    schema_path = CODEX_OUTPUT_SCHEMA_PATH.resolve()
     task = {
         "bench": "Verified",
         "instance_id": "task-retry",
@@ -491,18 +522,18 @@ def test_run_coding_agent_task_codex_retries_transient_failure(tmp_path, monkeyp
     monkeypatch.setattr("contextbench.coding_agents.runtime.checkout", lambda *args, **kwargs: str(workspace_path))
     monkeypatch.setattr("contextbench.coding_agents.runtime.reset_workspace", lambda path: None)
     monkeypatch.setattr(
-        "contextbench.coding_agents.runtime.prepare_codex_runtime_env",
+        "contextbench.agents.codex.runtime.prepare_runtime_env",
         lambda task_dir, **kwargs: {"HOME": str(task_dir)},
     )
     monkeypatch.setattr(
-        "contextbench.coding_agents.runtime.build_codex_command",
+        "contextbench.agents.codex.runtime.build_command",
         lambda **kwargs: (
             captured.__setitem__("final_output_path", kwargs["final_output_path"]) or ["codex", "exec", "-"],
             "codex-events.jsonl",
         ),
     )
     monkeypatch.setattr("contextbench.coding_agents.runtime.git_diff", lambda path: "")
-    monkeypatch.setattr("contextbench.coding_agents.runtime.time.sleep", lambda seconds: None)
+    monkeypatch.setattr("contextbench.agents.codex.runtime.time.sleep", lambda seconds: None)
 
     def fake_run_command(command, *, cwd, stdin_text, stdout_path, stderr_path, timeout, env=None):
         captured["attempt"] = int(captured["attempt"]) + 1
@@ -545,7 +576,7 @@ def test_run_coding_agent_task_codex_retries_transient_failure(tmp_path, monkeyp
         )
         return {"ok": True, "exit_code": 0, "signal": None, "timeout": False}
 
-    monkeypatch.setattr("contextbench.coding_agents.runtime.run_command", fake_run_command)
+    monkeypatch.setattr("contextbench.agents.codex.runtime.run_command", fake_run_command)
 
     record = run_coding_agent_task(
         task=task,
@@ -573,7 +604,7 @@ def test_run_coding_agent_task_passes_workspace_key_to_checkout(tmp_path, monkey
     workspace_path.mkdir()
     output_dir = tmp_path / "results"
     cache_dir = tmp_path / "cache"
-    schema_path = Path("contextbench/schemas/coding_agent_output.schema.json").resolve()
+    schema_path = CODEX_OUTPUT_SCHEMA_PATH.resolve()
     task = {
         "bench": "Verified",
         "instance_id": "task-workspace-key",
@@ -592,11 +623,11 @@ def test_run_coding_agent_task_passes_workspace_key_to_checkout(tmp_path, monkey
     monkeypatch.setattr("contextbench.coding_agents.runtime.checkout", fake_checkout)
     monkeypatch.setattr("contextbench.coding_agents.runtime.reset_workspace", lambda path: None)
     monkeypatch.setattr(
-        "contextbench.coding_agents.runtime.prepare_codex_runtime_env",
+        "contextbench.agents.codex.runtime.prepare_runtime_env",
         lambda task_dir, **kwargs: {"HOME": str(task_dir)},
     )
     monkeypatch.setattr(
-        "contextbench.coding_agents.runtime.build_codex_command",
+        "contextbench.agents.codex.runtime.build_command",
         lambda **kwargs: (
             captured.setdefault("final_output_path", kwargs["final_output_path"]) and ["codex", "exec", "-"],
             "codex-events.jsonl",
@@ -624,7 +655,7 @@ def test_run_coding_agent_task_passes_workspace_key_to_checkout(tmp_path, monkey
         )
         return {"ok": True, "exit_code": 0, "signal": None, "timeout": False}
 
-    monkeypatch.setattr("contextbench.coding_agents.runtime.run_command", fake_run_command)
+    monkeypatch.setattr("contextbench.agents.codex.runtime.run_command", fake_run_command)
 
     run_coding_agent_task(
         task=task,
@@ -648,7 +679,7 @@ def test_run_coding_agent_task_codex_setup_prompt_runs_before_scored_prompt(
     workspace_path.mkdir()
     output_dir = tmp_path / "results"
     cache_dir = tmp_path / "cache"
-    schema_path = Path("contextbench/schemas/coding_agent_output.schema.json").resolve()
+    schema_path = CODEX_OUTPUT_SCHEMA_PATH.resolve()
     task = {
         "bench": "Verified",
         "instance_id": "task-setup",
@@ -663,7 +694,7 @@ def test_run_coding_agent_task_codex_setup_prompt_runs_before_scored_prompt(
     monkeypatch.setattr("contextbench.coding_agents.runtime.checkout", lambda *args, **kwargs: str(workspace_path))
     monkeypatch.setattr("contextbench.coding_agents.runtime.reset_workspace", lambda path: None)
     monkeypatch.setattr(
-        "contextbench.coding_agents.runtime.prepare_codex_runtime_env",
+        "contextbench.agents.codex.runtime.prepare_runtime_env",
         lambda task_dir, **kwargs: {"HOME": str(task_dir / "codex-home"), "EXPERIMENT": "1"},
     )
     monkeypatch.setattr("contextbench.coding_agents.runtime.git_diff", lambda path: "")
@@ -673,7 +704,7 @@ def test_run_coding_agent_task_codex_setup_prompt_runs_before_scored_prompt(
         captured["final_output_paths"][phase] = kwargs["final_output_path"]
         return ["codex", "exec", phase], f"{phase}-events.jsonl"
 
-    monkeypatch.setattr("contextbench.coding_agents.runtime.build_codex_command", fake_build_codex_command)
+    monkeypatch.setattr("contextbench.agents.codex.runtime.build_command", fake_build_codex_command)
 
     def fake_run_command(command, *, cwd, stdin_text, stdout_path, stderr_path, timeout, env=None):
         phase = command[-1]
@@ -717,7 +748,7 @@ def test_run_coding_agent_task_codex_setup_prompt_runs_before_scored_prompt(
             )
         return {"ok": True, "exit_code": 0, "signal": None, "timeout": False}
 
-    monkeypatch.setattr("contextbench.coding_agents.runtime.run_command", fake_run_command)
+    monkeypatch.setattr("contextbench.agents.codex.runtime.run_command", fake_run_command)
 
     record = run_coding_agent_task(
         task=task,
@@ -753,7 +784,7 @@ def test_run_coding_agent_task_codex_setup_prompt_failure_short_circuits_scored_
     workspace_path.mkdir()
     output_dir = tmp_path / "results"
     cache_dir = tmp_path / "cache"
-    schema_path = Path("contextbench/schemas/coding_agent_output.schema.json").resolve()
+    schema_path = CODEX_OUTPUT_SCHEMA_PATH.resolve()
     task = {
         "bench": "Verified",
         "instance_id": "task-setup-fail",
@@ -768,7 +799,7 @@ def test_run_coding_agent_task_codex_setup_prompt_failure_short_circuits_scored_
     monkeypatch.setattr("contextbench.coding_agents.runtime.checkout", lambda *args, **kwargs: str(workspace_path))
     monkeypatch.setattr("contextbench.coding_agents.runtime.reset_workspace", lambda path: None)
     monkeypatch.setattr(
-        "contextbench.coding_agents.runtime.prepare_codex_runtime_env",
+        "contextbench.agents.codex.runtime.prepare_runtime_env",
         lambda task_dir, **kwargs: {"HOME": str(task_dir / "codex-home")},
     )
     monkeypatch.setattr("contextbench.coding_agents.runtime.git_diff", lambda path: "")
@@ -778,7 +809,7 @@ def test_run_coding_agent_task_codex_setup_prompt_failure_short_circuits_scored_
         captured["final_output_paths"][phase] = kwargs["final_output_path"]
         return ["codex", "exec", phase], f"{phase}-events.jsonl"
 
-    monkeypatch.setattr("contextbench.coding_agents.runtime.build_codex_command", fake_build_codex_command)
+    monkeypatch.setattr("contextbench.agents.codex.runtime.build_command", fake_build_codex_command)
 
     def fake_run_command(command, *, cwd, stdin_text, stdout_path, stderr_path, timeout, env=None):
         phase = command[-1]
@@ -795,7 +826,7 @@ def test_run_coding_agent_task_codex_setup_prompt_failure_short_circuits_scored_
         final_output_path.write_text("setup failed", encoding="utf-8")
         return {"ok": False, "exit_code": 9, "signal": None, "timeout": False}
 
-    monkeypatch.setattr("contextbench.coding_agents.runtime.run_command", fake_run_command)
+    monkeypatch.setattr("contextbench.agents.codex.runtime.run_command", fake_run_command)
 
     record = run_coding_agent_task(
         task=task,

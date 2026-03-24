@@ -9,6 +9,7 @@ import json
 import time
 from pathlib import Path
 
+from ..agents.registry import get_coding_agent_adapter, has_coding_agent_adapter
 from ..coding_agents.files import read_json, safe_path_component
 
 
@@ -53,7 +54,7 @@ def task_key(task: dict[str, object]) -> str:
 def task_record_path(*, raw_root: Path, agent: str, task: dict[str, object]) -> Path:
     task_id = safe_path_component(task_key(task) or "task")
     bench = str(task.get("bench") or "Verified")
-    suffix = "codex" if agent == "codex" else "claude"
+    suffix = get_coding_agent_adapter(agent).record_suffix if has_coding_agent_adapter(agent) else safe_path_component(agent)
     return raw_root / agent / bench / task_id / f"{task_id}.{suffix}-record.json"
 
 

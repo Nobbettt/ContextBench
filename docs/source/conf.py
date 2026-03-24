@@ -25,6 +25,7 @@ extensions = [
     'sphinx.ext.viewcode',
     'sphinx.ext.autosummary',
     'sphinx.ext.mathjax',
+    'myst_parser',
     'sphinx_rtd_theme',
     'sphinx_copybutton',
 ]
@@ -62,7 +63,10 @@ html_logo = '../assets/branding/contextbench-logo.jpg'
 html_favicon = '../assets/branding/contextbench-logo.jpg'
 
 # The suffix(es) of source filenames
-source_suffix = '.rst'
+source_suffix = {
+    '.rst': 'restructuredtext',
+    '.md': 'markdown',
+}
 
 # The master toctree document
 master_doc = 'index'

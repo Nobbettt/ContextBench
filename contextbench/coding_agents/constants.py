@@ -15,18 +15,26 @@ DEFAULT_SUBSET_CSV = REPO_ROOT / "data" / "selected_500_instances.csv"
 DEFAULT_RESULTS_ROOT = REPO_ROOT / "results" / "coding_agents"
 # Default local repository checkout/worktree cache.
 DEFAULT_CACHE_DIR = REPO_ROOT / ".cache" / "repos"
-# Default schema used to constrain the benchmark-facing structured agent answer.
-DEFAULT_OUTPUT_SCHEMA_PATH = REPO_ROOT / "contextbench" / "schemas" / "coding_agent_output.schema.json"
+# Built-in schemas used to constrain benchmark-facing structured agent answers.
+CODEX_OUTPUT_SCHEMA_PATH = REPO_ROOT / "contextbench" / "agents" / "codex" / "output.schema.json"
+CLAUDE_OUTPUT_SCHEMA_PATH = REPO_ROOT / "contextbench" / "agents" / "claude" / "output.schema.json"
 
 # Candidate task-data field names, in priority order, for the natural-language issue prompt.
 DEFAULT_PROMPT_FIELDS = ["prompt", "question", "task", "problem_statement", "instruction"]
 # Required keys used to recognize the benchmark summary object inside raw CLI responses.
-FINAL_OUTPUT_REQUIRED_KEYS = [
-    "task_id",
+RICH_OUTPUT_KEYS = [
     "status",
     "final_answer",
     "touched_files",
     "retrieval_steps",
+    "retrieved_context_files",
+    "retrieved_context_spans",
+    "retrieved_context_symbols",
+    "notes",
+]
+SEMANTIC_OUTPUT_KEYS = [
+    "status",
+    "final_answer",
     "retrieved_context_files",
     "retrieved_context_spans",
     "retrieved_context_symbols",

@@ -9,8 +9,7 @@ from .sweagent import extract_trajectory as extract_swe
 from .agentless import extract_trajectory as extract_agentless
 from .prometheus import extract_trajectory as extract_prometheus
 from .openhands import extract_trajectory as extract_openhands
-from .codex import extract_trajectory as extract_codex
-from .claude import extract_trajectory as extract_claude
+from .registry import get_coding_agent_adapter, has_coding_agent_adapter, iter_coding_agent_adapters, normalize_coding_agent_name
 
 
 def extract_trajectory(traj_file_or_data) -> dict:
@@ -53,19 +52,24 @@ def extract_trajectory(traj_file_or_data) -> dict:
         return extract_agentless(traj_file)
     elif traj_file.endswith('output.jsonl'):
         return extract_openhands(traj_file)
-    elif traj_file.endswith('.codex-record.json'):
-        return extract_codex(traj_file)
-    elif traj_file.endswith('.claude-record.json'):
-        return extract_claude(traj_file)
-    elif traj_file.endswith('.log'):
-        # Prometheus .log files can be very large and the context markers may not
-        # appear in the first few KB. Let the Prometheus extractor decide.
-        data = extract_prometheus(traj_file)
-        if data.get("pred_steps") or data.get("pred_files") or data.get("pred_spans"):
-            return data
-        raise ValueError(f"Unsupported .log trajectory format: {traj_file}")
     else:
+        for adapter in iter_coding_agent_adapters():
+            if traj_file.endswith(f".{adapter.record_suffix}-record.json"):
+                return adapter.create_parser().extract_trajectory(traj_file)
+        if traj_file.endswith('.log'):
+            # Prometheus .log files can be very large and the context markers may not
+            # appear in the first few KB. Let the Prometheus extractor decide.
+            data = extract_prometheus(traj_file)
+            if data.get("pred_steps") or data.get("pred_files") or data.get("pred_spans"):
+                return data
+            raise ValueError(f"Unsupported .log trajectory format: {traj_file}")
         raise ValueError(f"Unsupported trajectory format: {traj_file}")
 
 
-__all__ = ['extract_trajectory']
+__all__ = [
+    'extract_trajectory',
+    'get_coding_agent_adapter',
+    'has_coding_agent_adapter',
+    'iter_coding_agent_adapters',
+    'normalize_coding_agent_name',
+]

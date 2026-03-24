@@ -30,16 +30,18 @@ This repo includes trajectory extractors for different coding agents, exposed vi
 - **Location**: `contextbench/agents/codex/extract.py`
 - **Notes**:
   - Extracts unified trajectories from the wrapper-produced Codex CLI record file
-  - Uses reported retrieval steps when present
-  - Falls back to touched files and diff-derived spans
+  - Prefers raw event-stream extraction from `codex-events.jsonl`
+  - Uses agent-reported final context as supplemental semantic information
+  - Detailed adapter doc: [docs/source/agents/codex.md](/Users/nobbe/Repos/ContextBench/docs/source/agents/codex.md)
 
 ### 4. Claude Code CLI
 - **Format**: `*.claude-record.json`
 - **Location**: `contextbench/agents/claude/extract.py`
 - **Notes**:
   - Extracts unified trajectories from the wrapper-produced Claude Code CLI record file
-  - Uses reported retrieval steps when present
-  - Falls back to touched files and diff-derived spans
+  - Prefers verbose JSON tool-history extraction from `raw-response.json`
+  - Uses agent-reported final context as supplemental semantic information
+  - Detailed adapter doc: [docs/source/agents/claude.md](/Users/nobbe/Repos/ContextBench/docs/source/agents/claude.md)
 
 ### Unified interface
 

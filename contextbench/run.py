@@ -59,10 +59,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from .agents.registry import get_coding_agent_adapter, has_coding_agent_adapter, iter_coding_agent_adapters
 from .coding_agents.constants import (
     DEFAULT_CACHE_DIR as DEFAULT_REPO_CACHE_DIR,
     DEFAULT_GOLD_PATH as DEFAULT_TASK_DATA_PATH,
-    DEFAULT_OUTPUT_SCHEMA_PATH as DEFAULT_CODING_AGENT_SCHEMA_PATH,
 )
 from .coding_agents.task_data import load_tasks as load_prompt_tasks
 
@@ -71,6 +71,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 AGENT_FRAMEWORKS = REPO_ROOT / "agent-frameworks"
 DEFAULT_TASK_CSV = REPO_ROOT / "data" / "selected_500_instances.csv"
 _DEBUG = False
+CODING_AGENT_NAMES = sorted({name for adapter in iter_coding_agent_adapters() for name in adapter.all_names})
 
 
 # ---------------------------------------------------------------------------
@@ -859,6 +860,11 @@ AGENT_RUNNERS: Dict[str, Dict[str, Any]] = {
     },
 }
 
+CODING_AGENT_RUNNERS: Dict[str, Any] = {
+    "codex": run_codex,
+    "claude": run_claude,
+}
+
 
 def run_instance(
     agent: str,
@@ -869,20 +875,12 @@ def run_instance(
     schema_path: Optional[Path] = None,
 ) -> Tuple[bool, str]:
     """Dispatch to bench-adapted agent runner."""
-    if agent == "codex":
+    if has_coding_agent_adapter(agent):
+        adapter = get_coding_agent_adapter(agent)
+        agent = adapter.name
         if repo_cache_dir is None or schema_path is None:
-            return False, "Missing codex runtime configuration"
-        return run_codex(
-            task,
-            output_dir,
-            timeout=timeout,
-            repo_cache_dir=repo_cache_dir,
-            schema_path=schema_path,
-        )
-    if agent == "claude":
-        if repo_cache_dir is None or schema_path is None:
-            return False, "Missing claude runtime configuration"
-        return run_claude(
+            return False, f"Missing {adapter.name} runtime configuration"
+        return CODING_AGENT_RUNNERS[agent](
             task,
             output_dir,
             timeout=timeout,
@@ -914,7 +912,7 @@ def main() -> int:
     ap.add_argument(
         "--agent",
         required=True,
-        choices=list(AGENT_RUNNERS.keys()),
+        choices=sorted(set(AGENT_RUNNERS.keys()) | set(CODING_AGENT_NAMES)),
         help="Agent from agent-frameworks to use",
     )
     ap.add_argument(
@@ -1031,7 +1029,7 @@ def main() -> int:
         instance_filter = [s.strip() for s in args.instances.split(",") if s.strip()]
 
     # Load tasks
-    if args.agent in ("codex", "claude"):
+    if has_coding_agent_adapter(args.agent):
         if not args.task_data.exists():
             print(f"ERROR: Task data not found: {args.task_data}", file=sys.stderr)
             return 2
@@ -1111,13 +1109,14 @@ def main() -> int:
                 args.output,
                 [task.get("instance_id", ""), task.get("original_inst_id", "")],
             )
+        schema_path = get_coding_agent_adapter(args.agent).output_schema_path if has_coding_agent_adapter(args.agent) else None
         ok, msg = run_instance(
             args.agent,
             task,
             args.output,
             timeout=args.timeout,
             repo_cache_dir=args.repo_cache,
-            schema_path=DEFAULT_CODING_AGENT_SCHEMA_PATH,
+            schema_path=schema_path,
         )
         if ok:
             success += 1

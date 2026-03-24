@@ -7,25 +7,49 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 
+from ..agents.registry import get_coding_agent_adapter, normalize_coding_agent_name
 from .files import read_json, read_jsonl
 from .records import merge_span_maps, normalize_retrieval_steps, normalize_span_map, normalize_symbol_map, parse_unified_diff
+from .trace_inference import merge_retrieval_steps
 from .types import SymbolMap, TrajectoryData
 
 
 def record_is_convertible(record: dict[str, object], expected_agent: str | None = None) -> bool:
     if not isinstance(record, dict):
         return False
-    agent = str(record.get("agent") or "").strip().lower()
+    raw_agent = str(record.get("agent") or "").strip().lower()
+    agent = normalize_coding_agent_name(raw_agent) or raw_agent
     if expected_agent:
-        normalized_expected = "claude" if expected_agent == "claude-code" else expected_agent
+        normalized_expected = normalize_coding_agent_name(expected_agent) or str(expected_agent).strip().lower()
         if agent and agent != normalized_expected:
             return False
     final_output = record.get("final_output")
     return isinstance(final_output, dict)
 
 
-def convert_run_record(record: dict[str, object]) -> dict[str, object]:
+def _parser_for_agent(agent: str):
+    try:
+        return get_coding_agent_adapter(agent).create_parser()
+    except ValueError:
+        return None
+
+
+def convert_run_record(record: dict[str, object], parser=None) -> dict[str, object]:
     final_output = record.get("final_output") or {}
+    task_id = (
+        final_output.get("task_id")
+        or record.get("instance_id")
+        or record.get("original_inst_id")
+        or ""
+    )
+    parser = parser or _parser_for_agent(str(record.get("agent") or ""))
+    raw_response = None
+    inferred_traj: TrajectoryData | None = None
+    if parser is not None and hasattr(parser, "load_raw_response"):
+        raw_response = parser.load_raw_response(record)
+        if raw_response is not None:
+            inferred_traj = parser.infer_trajectory_data(raw_response, record=record)
+
     retrieval_steps = normalize_retrieval_steps(final_output.get("retrieval_steps"))
     retrieved_context_files = sorted(
         {
@@ -61,21 +85,47 @@ def convert_run_record(record: dict[str, object]) -> dict[str, object]:
             if str(item).strip()
         }
     )
-    pred_files = (
-        retrieved_context_files
-        or sorted({file for step in retrieval_steps for file in step.get("files", [])})
-        or touched_files
-    )
-    pred_spans = retrieved_context_spans or merged_step_spans or diff_spans
-    pred_symbols = retrieved_context_symbols or merged_step_symbols
-    pred_steps = (
-        retrieval_steps
-        or (
-            [{"files": pred_files, "spans": pred_spans, "symbols": pred_symbols}]
-            if pred_files or pred_spans or pred_symbols
-            else []
+    inferred_steps = inferred_traj.get("pred_steps", []) if inferred_traj else []
+    inferred_files = inferred_traj.get("pred_files", []) if inferred_traj else []
+    inferred_spans = inferred_traj.get("pred_spans", {}) if inferred_traj else {}
+    inferred_symbols = inferred_traj.get("pred_symbols", {}) if inferred_traj else {}
+
+    pred_steps = merge_retrieval_steps(inferred_steps, retrieval_steps)
+    pred_files = sorted(
+        set(
+            inferred_files
+            or []
         )
+        | set(retrieved_context_files)
+        | {file for step in pred_steps for file in step.get("files", [])}
+        | set(touched_files)
     )
+    pred_spans = merge_span_maps(inferred_spans, retrieved_context_spans, merged_step_spans, diff_spans)
+    pred_spans = {
+        file_path: [
+            span
+            for _, span in sorted(
+                {
+                    (span["start"], span["end"]): span
+                    for span in spans
+                }.items()
+            )
+        ]
+        for file_path, spans in pred_spans.items()
+        if spans
+    }
+    pred_symbols: SymbolMap = {}
+    for mapping in (inferred_symbols, retrieved_context_symbols, merged_step_symbols):
+        for file_path, names in mapping.items():
+            pred_symbols.setdefault(file_path, []).extend(names)
+    pred_symbols = {file_path: sorted(set(names)) for file_path, names in pred_symbols.items() if names}
+    if not pred_steps and (pred_files or pred_spans or pred_symbols):
+        pred_steps = [{"files": pred_files, "spans": pred_spans, "symbols": pred_symbols}]
+
+    if not touched_files:
+        touched_files = sorted({*pred_files, *diff_spans.keys()})
+    if not retrieval_steps:
+        retrieval_steps = pred_steps
 
     traj_data: TrajectoryData = {
         "pred_steps": pred_steps,
@@ -85,7 +135,7 @@ def convert_run_record(record: dict[str, object]) -> dict[str, object]:
     }
 
     return {
-        "instance_id": record.get("instance_id") or record.get("original_inst_id") or "",
+        "instance_id": task_id,
         "original_inst_id": record.get("original_inst_id") or None,
         "repo_url": record.get("repo_url") or None,
         "commit": record.get("commit") or None,
