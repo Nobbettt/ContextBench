@@ -75,6 +75,10 @@ def git_diff(workspace_path: Path) -> str:
     return result.stdout or ""
 
 
+def codex_runtime_root(task_dir: Path) -> Path:
+    return task_dir / "codex-runtime"
+
+
 def build_codex_command(
     *,
     workspace_path: Path,
@@ -82,6 +86,7 @@ def build_codex_command(
     final_output_path: Path | None,
     model: str | None,
     reasoning_effort: str | None,
+    writable_dirs: Sequence[Path] = (),
     extra_args: Sequence[str],
 ) -> tuple[list[str], str]:
     # Codex does not expose a Claude-style verbose flag; --json is the richest machine-readable mode.
@@ -104,6 +109,13 @@ def build_codex_command(
         command.extend(["--model", model])
     if reasoning_effort:
         command.extend(["-c", f"model_reasoning_effort={json.dumps(reasoning_effort)}"])
+    seen_dirs: set[str] = set()
+    for path in writable_dirs:
+        resolved = str(path.resolve())
+        if resolved in seen_dirs:
+            continue
+        seen_dirs.add(resolved)
+        command.extend(["--add-dir", resolved])
     command.extend(extra_args)
     command.append("-")
     return command, "codex-events.jsonl"
@@ -174,8 +186,8 @@ def run_command(
             check=False,
             env=env,
         )
-        stdout_path.write_text(result.stdout or "", encoding="utf-8")
-        stderr_path.write_text(result.stderr or "", encoding="utf-8")
+        stdout_path.write_text(_coerce_output_text(result.stdout), encoding="utf-8")
+        stderr_path.write_text(_coerce_output_text(result.stderr), encoding="utf-8")
         return {
             "ok": result.returncode == 0,
             "exit_code": result.returncode,
@@ -183,8 +195,8 @@ def run_command(
             "timeout": False,
         }
     except subprocess.TimeoutExpired as exc:
-        stdout_path.write_text(exc.stdout or "", encoding="utf-8")
-        stderr_path.write_text(exc.stderr or "", encoding="utf-8")
+        stdout_path.write_text(_coerce_output_text(exc.stdout), encoding="utf-8")
+        stderr_path.write_text(_coerce_output_text(exc.stderr), encoding="utf-8")
         return {
             "ok": False,
             "exit_code": None,
@@ -203,6 +215,14 @@ def _merge_json_objects(base: object, override: object) -> object:
                 merged[key] = value
         return merged
     return override
+
+
+def _coerce_output_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
 
 
 def _resolve_runtime_path(roots: dict[str, Path], *, target_root: str, relative_path: str) -> Path:
@@ -262,6 +282,7 @@ def _apply_copy_paths(
             destination = source_path.name
         target_path = _resolve_runtime_path(roots, target_root=target_root, relative_path=destination or ".")
         if source_path.is_dir():
+            ensure_dir(target_path.parent)
             shutil.copytree(source_path, target_path, dirs_exist_ok=True)
             continue
         if destination.endswith("/") or destination in ("", "."):
@@ -286,7 +307,7 @@ def prepare_codex_runtime_env(
     if not auth_path.exists():
         raise usage_error(f"Codex auth is unavailable: expected {auth_path}")
 
-    runtime_root = task_dir / "codex-runtime"
+    runtime_root = codex_runtime_root(task_dir)
     home_dir = runtime_root / "home"
     codex_home = home_dir / ".codex"
     xdg_config_home = runtime_root / "xdg-config"
@@ -398,10 +419,62 @@ def _normalize_claude_reasoning_effort(reasoning_effort: str | None) -> str | No
     return reasoning_effort
 
 
+_CODEX_RETRYABLE_ERROR_SNIPPETS = (
+    "failed to connect to websocket",
+    "currently experiencing high demand",
+    "missing bearer or basic authentication in header",
+    "falling back from websockets to https transport",
+)
+_CODEX_RETRY_DELAYS_SECONDS = (2, 5)
+
+
 def _write_prompt_file(task_dir: Path, filename: str, prompt: str) -> Path:
     path = task_dir / filename
     path.write_text(prompt, encoding="utf-8")
     return path
+
+
+def _attempt_path(path: Path, attempt_index: int) -> Path:
+    return path.with_name(f"{path.stem}.attempt{attempt_index}{path.suffix}")
+
+
+def _archive_retry_artifacts(paths: Sequence[Path | None], *, attempt_index: int) -> None:
+    for path in paths:
+        if path is None or not path.exists():
+            continue
+        shutil.copy2(path, _attempt_path(path, attempt_index))
+
+
+def _codex_raw_response_text(raw_response: CodexRawResponse) -> str:
+    fragments: list[str] = []
+    for event in raw_response.get("events", []):
+        if not isinstance(event, dict):
+            continue
+        message = str(event.get("message") or "").strip()
+        if message:
+            fragments.append(message)
+        error = event.get("error")
+        if isinstance(error, dict):
+            message = str(error.get("message") or "").strip()
+            if message:
+                fragments.append(message)
+    final_message = raw_response.get("final_message")
+    if isinstance(final_message, str) and final_message.strip():
+        fragments.append(final_message.strip())
+    return "\n".join(fragments)
+
+
+def _should_retry_codex_failure(
+    *,
+    command_result: CommandResult,
+    raw_response: CodexRawResponse,
+    stderr_path: Path,
+) -> bool:
+    if command_result["ok"] or command_result["timeout"]:
+        return False
+    stderr_text = stderr_path.read_text(encoding="utf-8", errors="replace") if stderr_path.exists() else ""
+    haystack = "\n".join((stderr_text, _codex_raw_response_text(raw_response))).lower()
+    return any(snippet in haystack for snippet in _CODEX_RETRYABLE_ERROR_SNIPPETS)
 
 
 def _run_codex_invocation(
@@ -426,28 +499,49 @@ def _run_codex_invocation(
     stderr_path = task_dir / stderr_filename
     raw_response_path = task_dir / raw_response_filename
     final_output_path = task_dir / final_output_filename if final_output_filename else None
+    writable_dirs = [codex_runtime_root(task_dir)]
     command, _ = build_codex_command(
         workspace_path=workspace_path,
         schema_path=schema_path,
         final_output_path=final_output_path,
         model=model,
         reasoning_effort=_normalize_codex_reasoning_effort(reasoning_effort),
+        writable_dirs=writable_dirs,
         extra_args=extra_args,
     )
     raw_output_path = task_dir / raw_output_filename
     started_at = time.time()
-    command_result = run_command(
-        command,
-        cwd=workspace_path,
-        stdin_text=prompt,
-        stdout_path=raw_output_path,
-        stderr_path=stderr_path,
-        timeout=timeout,
-        env=env,
-    )
-    completed_at = time.time()
-    raw_response: CodexRawResponse = build_codex_raw_response(raw_output_path, final_output_path)
-    write_json(raw_response_path, raw_response)
+    raw_response: CodexRawResponse = {"agent": "codex", "response_format": "jsonl-events", "events": []}
+    command_result: CommandResult = {"ok": False, "exit_code": None, "signal": None, "timeout": False}
+    max_attempts = len(_CODEX_RETRY_DELAYS_SECONDS) + 1
+    completed_at = started_at
+    for attempt_index in range(1, max_attempts + 1):
+        for path in (raw_output_path, stderr_path, raw_response_path, final_output_path):
+            if path is not None and path.exists():
+                path.unlink()
+        command_result = run_command(
+            command,
+            cwd=workspace_path,
+            stdin_text=prompt,
+            stdout_path=raw_output_path,
+            stderr_path=stderr_path,
+            timeout=timeout,
+            env=env,
+        )
+        completed_at = time.time()
+        raw_response = build_codex_raw_response(raw_output_path, final_output_path)
+        write_json(raw_response_path, raw_response)
+        if attempt_index >= max_attempts or not _should_retry_codex_failure(
+            command_result=command_result,
+            raw_response=raw_response,
+            stderr_path=stderr_path,
+        ):
+            break
+        _archive_retry_artifacts(
+            [raw_output_path, stderr_path, raw_response_path, final_output_path],
+            attempt_index=attempt_index,
+        )
+        time.sleep(_CODEX_RETRY_DELAYS_SECONDS[attempt_index - 1])
     structured_output = parser.extract_structured_output(raw_response) if schema_path is not None else None
     return _InvocationResult(
         prompt_path=prompt_path,
@@ -560,7 +654,7 @@ def run_coding_agent_task(
     workspace_path = Path(workspace)
     reset_workspace(workspace_path)
 
-    task_dir = output_dir / safe_path_component(task.get("instance_id") or task.get("original_inst_id") or "task")
+    task_dir = (output_dir / safe_path_component(task.get("instance_id") or task.get("original_inst_id") or "task")).resolve()
     ensure_dir(task_dir)
 
     prompt = build_prompt(task, agent)

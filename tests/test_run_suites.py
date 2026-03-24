@@ -50,6 +50,7 @@ def _fake_run_coding_agent_task(call_log: list[dict[str, object]]):
         schema_path,
         timeout,
         model=None,
+        reasoning_effort=None,
         agent_args=(),
         env_overrides=None,
         prompt_preamble=None,
@@ -113,6 +114,7 @@ def _fake_run_coding_agent_task(call_log: list[dict[str, object]]):
                 "task_id": task.get("instance_id"),
                 "agent": agent,
                 "agent_args": list(agent_args),
+                "reasoning_effort": reasoning_effort,
                 "env": dict(env_overrides or {}),
                 "prompt_preamble": prompt_preamble,
                 "setup": dict(setup or {}),
@@ -137,6 +139,7 @@ def test_build_run_suite_variant_merges_base_and_variant_overrides(tmp_path) -> 
                 "repo_cache": str(tmp_path / "cache"),
                 "agent_args": ["--base"],
                 "env": {"BASE": "1"},
+                "reasoning_effort": "medium",
                 "setup": {
                     "copy_paths": [
                         {
@@ -150,6 +153,7 @@ def test_build_run_suite_variant_merges_base_and_variant_overrides(tmp_path) -> 
             "variants": [
                 {
                     "name": "with-plugin",
+                    "reasoning_effort": "high",
                     "agent_args_add": ["--plugin"],
                     "env_add": {"PLUGIN": "1"},
                     "setup": {
@@ -175,6 +179,7 @@ def test_build_run_suite_variant_merges_base_and_variant_overrides(tmp_path) -> 
 
     assert effective.agent_args == ["--base", "--plugin"]
     assert effective.env == {"BASE": "1", "PLUGIN": "1"}
+    assert effective.reasoning_effort == "high"
     assert effective.setup.prompt_preamble == "Enable plugin"
     assert effective.setup.setup_prompt == "Bootstrap tools first"
     assert effective.setup.setup_prompt_timeout == 90
@@ -205,6 +210,27 @@ def test_run_suite_config_rejects_claude_only_invalid_target_roots(tmp_path) -> 
                             }
                         ]
                     },
+                },
+                "variants": [{"name": "baseline"}],
+                "postprocess": {"convert": False, "evaluate": False},
+            }
+        )
+
+
+def test_run_suite_config_rejects_unsupported_claude_reasoning_effort(tmp_path) -> None:
+    task_data, task_csv = _write_task_inputs(tmp_path, count=1)
+
+    with pytest.raises(ValueError, match="Agent 'claude' only supports reasoning_effort values"):
+        RunSuiteConfig.model_validate(
+            {
+                "experiment_name": "claude-invalid-reasoning",
+                "agent": "claude",
+                "base_run": {
+                    "task_data": str(task_data),
+                    "task_csv": str(task_csv),
+                    "output_root": str(tmp_path / "results"),
+                    "repo_cache": str(tmp_path / "cache"),
+                    "reasoning_effort": "minimal",
                 },
                 "variants": [{"name": "baseline"}],
                 "postprocess": {"convert": False, "evaluate": False},
@@ -275,11 +301,13 @@ def test_run_suite_runner_writes_manifest_and_variant_outputs(tmp_path, monkeypa
                 "output_root": str(tmp_path / "results"),
                 "repo_cache": str(tmp_path / "cache"),
                 "timeout": 30,
+                "reasoning_effort": "medium",
             },
             "variants": [
                 {"name": "baseline"},
                 {
                     "name": "with-plugin",
+                    "reasoning_effort": "xhigh",
                     "agent_args_add": ["--plugin"],
                     "env_add": {"PLUGIN": "1"},
                     "setup": {
@@ -315,6 +343,7 @@ def test_run_suite_runner_writes_manifest_and_variant_outputs(tmp_path, monkeypa
     plugin_calls = [call for call in call_log if call["prompt_preamble"] == "Plugin enabled"]
     assert len(plugin_calls) == 2
     assert all(call["agent_args"] == ["--plugin"] for call in plugin_calls)
+    assert all(call["reasoning_effort"] == "xhigh" for call in plugin_calls)
     assert all(call["env"] == {"PLUGIN": "1"} for call in plugin_calls)
     assert all(call["setup"]["setup_prompt"] == "Bootstrap plugin" for call in plugin_calls)
     assert all(call["setup"]["setup_prompt_timeout"] == 45 for call in plugin_calls)
@@ -361,6 +390,115 @@ def test_run_suite_runner_resume_skips_completed_tasks(tmp_path, monkeypatch) ->
     assert len(call_log) == 1
     assert len(cleanup_calls) == 1
     assert variant["task_counts"]["skipped"] == 1
+
+
+def test_run_suite_runner_resume_allows_limit_increase(tmp_path, monkeypatch) -> None:
+    task_data, task_csv = _write_task_inputs(tmp_path, count=2)
+    call_log: list[dict[str, object]] = []
+    cleanup_calls: list[tuple[str, str, str]] = []
+    monkeypatch.setattr("contextbench.run_suites_core.runner.run_coding_agent_task", _fake_run_coding_agent_task(call_log))
+    monkeypatch.setattr(
+        "contextbench.run_suites_core.runner.remove_worktree",
+        lambda repo_url, cache_dir, worktree_dir: cleanup_calls.append((repo_url, cache_dir, worktree_dir)),
+    )
+
+    config_first = RunSuiteConfig.model_validate(
+        {
+            "experiment_name": "resume-limit-change",
+            "agent": "codex",
+            "base_run": {
+                "task_data": str(task_data),
+                "task_csv": str(task_csv),
+                "output_root": str(tmp_path / "results"),
+                "repo_cache": str(tmp_path / "cache"),
+                "timeout": 30,
+                "limit": 1,
+            },
+            "variants": [{"name": "baseline"}],
+            "postprocess": {"convert": True, "evaluate": False},
+        }
+    )
+    config_second = RunSuiteConfig.model_validate(
+        {
+            "experiment_name": "resume-limit-change",
+            "agent": "codex",
+            "base_run": {
+                "task_data": str(task_data),
+                "task_csv": str(task_csv),
+                "output_root": str(tmp_path / "results"),
+                "repo_cache": str(tmp_path / "cache"),
+                "timeout": 30,
+                "limit": 2,
+            },
+            "variants": [{"name": "baseline"}],
+            "postprocess": {"convert": True, "evaluate": False},
+        }
+    )
+
+    first_rc = RunSuiteRunner(config_first).run()
+    second_rc = RunSuiteRunner(config_second, resume=True).run()
+
+    manifest = json.loads((tmp_path / "results" / "resume-limit-change" / "manifest.json").read_text(encoding="utf-8"))
+    variant = manifest["variants"][0]
+
+    assert first_rc == 0
+    assert second_rc == 0
+    assert len(call_log) == 2
+    assert [call["task_id"] for call in call_log] == ["psf__requests-1000", "psf__requests-1001"]
+    assert len(cleanup_calls) == 2
+    assert variant["task_counts"]["total"] == 2
+    assert variant["task_counts"]["completed"] == 1
+    assert variant["task_counts"]["skipped"] == 1
+
+
+def test_run_suite_runner_resume_rejects_model_change(tmp_path, monkeypatch) -> None:
+    task_data, task_csv = _write_task_inputs(tmp_path, count=1)
+    call_log: list[dict[str, object]] = []
+    cleanup_calls: list[tuple[str, str, str]] = []
+    monkeypatch.setattr("contextbench.run_suites_core.runner.run_coding_agent_task", _fake_run_coding_agent_task(call_log))
+    monkeypatch.setattr(
+        "contextbench.run_suites_core.runner.remove_worktree",
+        lambda repo_url, cache_dir, worktree_dir: cleanup_calls.append((repo_url, cache_dir, worktree_dir)),
+    )
+
+    config_first = RunSuiteConfig.model_validate(
+        {
+            "experiment_name": "resume-model-change",
+            "agent": "codex",
+            "base_run": {
+                "task_data": str(task_data),
+                "task_csv": str(task_csv),
+                "output_root": str(tmp_path / "results"),
+                "repo_cache": str(tmp_path / "cache"),
+                "timeout": 30,
+                "model": "gpt-5.4",
+            },
+            "variants": [{"name": "baseline"}],
+            "postprocess": {"convert": True, "evaluate": False},
+        }
+    )
+    config_second = RunSuiteConfig.model_validate(
+        {
+            "experiment_name": "resume-model-change",
+            "agent": "codex",
+            "base_run": {
+                "task_data": str(task_data),
+                "task_csv": str(task_csv),
+                "output_root": str(tmp_path / "results"),
+                "repo_cache": str(tmp_path / "cache"),
+                "timeout": 30,
+                "model": "gpt-5.3-codex",
+            },
+            "variants": [{"name": "baseline"}],
+            "postprocess": {"convert": True, "evaluate": False},
+        }
+    )
+
+    first_rc = RunSuiteRunner(config_first).run()
+
+    assert first_rc == 0
+    with pytest.raises(RuntimeError, match="already exists with a different effective config"):
+        RunSuiteRunner(config_second, resume=True).run()
 
 
 def test_run_suite_runner_resume_reruns_full_task_fanout_when_one_variant_is_missing(tmp_path, monkeypatch) -> None:
@@ -430,13 +568,14 @@ def test_run_suite_runner_cleans_successful_worktrees_but_keeps_failed_runs(tmp_
         schema_path,
         timeout,
         model=None,
+        reasoning_effort=None,
         agent_args=(),
         env_overrides=None,
         prompt_preamble=None,
         setup=None,
         workspace_key=None,
     ):
-        del cache_dir, schema_path, timeout, model, agent_args, env_overrides, prompt_preamble, setup
+        del cache_dir, schema_path, timeout, model, reasoning_effort, agent_args, env_overrides, prompt_preamble, setup
         task_id = safe_path_component(task.get("instance_id") or task.get("original_inst_id") or "task")
         task_dir = output_dir / task_id
         task_dir.mkdir(parents=True, exist_ok=True)

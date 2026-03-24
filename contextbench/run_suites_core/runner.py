@@ -64,6 +64,19 @@ class RunSuiteRunner:
         self.experiment_config_path = self.experiment_dir / "experiment.json"
         self._run_invocation_key = safe_path_component(f"{time.time_ns()}")
 
+    @staticmethod
+    def _resume_compatible_effective_config(
+        previous_config: object,
+        current_config: dict[str, object],
+    ) -> bool:
+        if not isinstance(previous_config, dict):
+            return False
+        previous = dict(previous_config)
+        current = dict(current_config)
+        previous.pop("limit", None)
+        current.pop("limit", None)
+        return previous == current
+
     def _load_tasks(self) -> tuple[list[dict[str, object]], dict[str, object]]:
         base = self.config.base_run
         subset_csv = base.subset_csv or base.task_csv
@@ -203,11 +216,20 @@ class RunSuiteRunner:
             if effective_config_path.exists():
                 previous = read_json(effective_config_path)
                 previous_hash = previous.get("config_hash") if isinstance(previous, dict) else None
+                previous_effective_config = (
+                    previous.get("effective_config")
+                    if isinstance(previous, dict)
+                    else None
+                )
                 if previous_hash != config_payload["config_hash"]:
-                    raise RuntimeError(
-                        f"Variant '{variant.name}' already exists with a different effective config. "
-                        "Use a new experiment name or enable rerun."
-                    )
+                    if not (
+                        self.resume
+                        and self._resume_compatible_effective_config(previous_effective_config, effective_config)
+                    ):
+                        raise RuntimeError(
+                            f"Variant '{variant.name}' already exists with a different effective config. "
+                            "Use a new experiment name or enable rerun."
+                        )
             if not self.resume:
                 raise RuntimeError(
                     f"Variant '{variant.name}' already exists. Re-run with --resume or set base_run.rerun=true."
